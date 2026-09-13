@@ -24,16 +24,6 @@ const withNoWebpConversion = (config) => {
   });
 };
 
-// Pull in everything from app.json and apply the plugin
-const appJson = require('./app.json');
-
 module.exports = ({ config }) => {
-  const merged = {
-    ...appJson.expo,
-    plugins: [
-      ...(appJson.expo.plugins || []),
-    ],
-  };
-
-  return withNoWebpConversion(merged);
+  return withNoWebpConversion(config);
 };
