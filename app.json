@@ -20,7 +20,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "ng.numvault.app",
-      "versionCode": 9,
+      "versionCode": 10,
       "enableShrinkResourcesInReleaseBuilds": false,
       "enableProguardInReleaseBuilds": false
     },
