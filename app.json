@@ -8,7 +8,12 @@
     "scheme": "numvault",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "assets/images/icon.png",
+      "assets/images/nv_s1.png",
+      "assets/images/nv_s2.png",
+      "assets/images/nv_s3.png"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "ng.numvault.app"
