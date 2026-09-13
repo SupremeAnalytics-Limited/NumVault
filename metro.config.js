@@ -1,3 +1,4 @@
+// cache-bust: build-v6
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
 
