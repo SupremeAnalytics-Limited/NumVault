@@ -18,7 +18,9 @@
         "backgroundColor": "#0D1117"
       },
       "edgeToEdgeEnabled": true,
-      "package": "ng.numvault.app"
+      "package": "ng.numvault.app",
+      "enableShrinkResourcesInReleaseBuilds": false,
+      "enableProguardInReleaseBuilds": false
     },
     "web": {
       "bundler": "metro",
