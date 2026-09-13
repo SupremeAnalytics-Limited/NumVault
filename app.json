@@ -2,7 +2,7 @@
   "expo": {
     "name": "NumVault",
     "slug": "numvault",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "numvault",
@@ -20,7 +20,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "ng.numvault.app",
-      "versionCode": 8,
+      "versionCode": 9,
       "enableShrinkResourcesInReleaseBuilds": false,
       "enableProguardInReleaseBuilds": false
     },

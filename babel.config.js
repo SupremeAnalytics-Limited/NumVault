@@ -1,5 +1,6 @@
+// cache-bust: nv-build-9
 module.exports = function (api) {
-  api.cache(true);
+  api.cache.invalidate(() => 'nv-build-9');
   return {
     presets: ['babel-preset-expo'],
   };
