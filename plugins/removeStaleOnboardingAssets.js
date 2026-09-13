@@ -27,6 +27,8 @@ tasks.register('removeStaleOnboardingAssets') {
         def dirs = [
             "\${buildDir}/generated/res/createBundleReleaseJsAndAssets",
             "\${buildDir}/intermediates/merged_res/release",
+            "\${buildDir}/intermediates/res/merged/release",
+            "\${buildDir}/intermediates/incremental/mergeReleaseResources",
         ]
         def patterns = [
             'assets_images_onboarding1.png',
@@ -46,6 +48,12 @@ tasks.register('removeStaleOnboardingAssets') {
 }
 
 tasks.whenTaskAdded { task ->
+    // Run cleanup immediately AFTER Metro generates the bundle resources,
+    // so stale files are gone before mergeReleaseResources starts.
+    if (task.name == 'createBundleReleaseJsAndAssets') {
+        task.finalizedBy 'removeStaleOnboardingAssets'
+    }
+    // Belt-and-suspenders: also block merge until cleanup is done.
     if (task.name == 'mergeReleaseResources') {
         task.dependsOn 'removeStaleOnboardingAssets'
     }
