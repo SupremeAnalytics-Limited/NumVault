@@ -14,17 +14,17 @@ const { width, height } = Dimensions.get('window');
 
 const SCREENS = [
   {
-    image: require('@/assets/images/ob1.png'),
+    image: require('@/assets/images/nv_s1.png'),
     headline: "Your number is more exposed than you think",
     subtext: "Every sign-up form, every stranger you meet online, every app you download — they all want your real number. NumVault gives you a private one instead.",
   },
   {
-    image: require('@/assets/images/ob2.png'),
+    image: require('@/assets/images/nv_s2.png'),
     headline: "Privacy shouldn't be optional",
     subtext: "Protect yourself from spam, harassment, and SIM-swap fraud. Use NumVault for dating apps, online marketplaces, and any sign-up — without ever exposing your real number.",
   },
   {
-    image: require('@/assets/images/ob3.png'),
+    image: require('@/assets/images/nv_s3.png'),
     headline: "Here's exactly how it works",
     steps: [
       { num: "1", text: "Choose what you're signing up for" },
