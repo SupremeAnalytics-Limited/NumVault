@@ -1,3 +1,4 @@
+// cache-bust: build-v3
 import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, TouchableOpacity,
