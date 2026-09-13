@@ -2,12 +2,18 @@
   "expo": {
     "name": "NumVault",
     "slug": "numvault",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "numvault",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "assets/images/icon.png",
+      "assets/images/nv_s1.png",
+      "assets/images/nv_s2.png",
+      "assets/images/nv_s3.png"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "ng.numvault.app"
@@ -19,6 +25,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "ng.numvault.app",
+      "versionCode": 2,
       "enableShrinkResourcesInReleaseBuilds": false,
       "enableProguardInReleaseBuilds": false
     },
