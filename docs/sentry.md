@@ -4,23 +4,12 @@
 
 | Area | Status |
 |---|---|
-| SDK installed (`@sentry/react-native`) | ✅ Done |
-| `Sentry.init()` in `app/_layout.tsx` | ✅ Done |
-| `Sentry.wrap()` on root component | ✅ Done |
-| Navigation tracing (`reactNativeTracingIntegration`) | ✅ Done |
-| Session Replay (`mobileReplayIntegration`) | ✅ Done |
-| User context (`setSentryUser` / `clearSentryUser`) | ✅ Done |
-| Auth event tracking | ✅ Done |
-| Checkout/payment event tracking | ✅ Done |
-| Wallet/refund event tracking | ✅ Done |
-| Order/OTP event tracking | ✅ Done |
-| `beforeSend` sensitive-key stripping | ✅ Done |
-| `beforeBreadcrumb` sensitive-log filter | ✅ Done |
-| `sentry.properties` (org/project for CLI uploads) | ✅ Done |
-| **`EXPO_PUBLIC_SENTRY_DSN` in `.env`** | ✅ Configured in OnSpace secrets |
-| `@sentry/react-native/expo` plugin in `app.json` | ✅ Done (org + project + `enableMetroModuleIdFactory: false`) |
-| Source-map uploads | ⚠️ Set `SENTRY_AUTH_TOKEN` build secret |
-| Native symbol uploads (Android ProGuard / iOS dSYM) | ⚠️ Set `SENTRY_AUTH_TOKEN` build secret |
+| SDK installed (`@sentry/react-native`) | ❌ Cannot install in OnSpace (postinstall conflict) |
+| `sentryService.ts` call sites preserved (stubs) | ✅ All functions are no-ops — zero call-site changes |
+| `Sentry.init()` in `app/_layout.tsx` | ❌ Removed (requires SDK) |
+| `@sentry/react-native/expo` plugin in `app.json` | ❌ Removed (causes install failure) |
+| `sentry.properties` (org/project for CLI uploads) | ✅ Present |
+| All event tracking functions | ✅ Stubbed — ready to activate once SDK installs |
 
 ---
 

@@ -36,14 +36,6 @@
     },
     "plugins": [
       "./plugins/removeStaleOnboardingAssets",
-      [
-        "@sentry/react-native/expo",
-        {
-          "organization": "supremeanalytics",
-          "project": "numvault",
-          "enableMetroModuleIdFactory": false
-        }
-      ],
       "expo-router",
       [
         "expo-splash-screen",
