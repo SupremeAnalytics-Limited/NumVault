@@ -702,7 +702,7 @@ const styles = StyleSheet.create({
 
   // Chip bar
   chipRow: {
-    paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg, paddingTop: 4, paddingBottom: Spacing.md, gap: Spacing.sm,
     flexDirection: 'row', alignItems: 'center',
   },
   chip: {

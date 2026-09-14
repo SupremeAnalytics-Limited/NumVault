@@ -416,29 +416,30 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        <View style={styles.section}>
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
-            <MaterialIcons name="logout" size={18} color={Colors.error} />
-            <Text style={styles.logoutText}>Sign Out</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ── Delete Account ── */}
+        {/* ── Sign Out + Delete Account — compact row group ── */}
         <View style={[styles.section, { marginBottom: Spacing.xl }]}>
-          <Text style={styles.sectionLabel}>Danger Zone</Text>
-          <TouchableOpacity
-            style={styles.deleteAccountBtn}
-            onPress={() => {
-              setDeleteConfirmText('');
-              setShowDeleteModal(true);
-            }}
-            activeOpacity={0.8}
-          >
-            <MaterialIcons name="delete-forever" size={18} color={Colors.error} />
-            <Text style={styles.deleteAccountText}>Delete My Account</Text>
-          </TouchableOpacity>
+          <View style={styles.menuCard}>
+            <TouchableOpacity
+              style={styles.menuRow}
+              onPress={handleLogout}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="logout" size={18} color={Colors.error} />
+              <Text style={[styles.menuLabel, { color: Colors.error, flex: 1 }]}>Sign Out</Text>
+              <MaterialIcons name="chevron-right" size={18} color={Colors.error} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.menuRow, { borderBottomWidth: 0 }]}
+              onPress={() => { setDeleteConfirmText(''); setShowDeleteModal(true); }}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="delete-forever" size={18} color={Colors.error} />
+              <Text style={[styles.menuLabel, { color: Colors.error, flex: 1 }]}>Delete Account</Text>
+              <MaterialIcons name="chevron-right" size={18} color={Colors.error} />
+            </TouchableOpacity>
+          </View>
           <Text style={styles.deleteAccountHint}>
-            Permanently removes your account, wallet, orders, and all personal data. This cannot be undone.
+            Permanently removes your account, wallet, orders, and all personal data.
           </Text>
         </View>
 
@@ -648,32 +649,7 @@ const styles = StyleSheet.create({
   menuLabel: { flex: 1, color: Colors.textSecondary, fontSize: FontSize.sm },
   menuValue: { color: Colors.text, fontSize: FontSize.sm },
   supportRow: { borderBottomWidth: 0 },
-  logoutBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    backgroundColor: Colors.errorMuted,
-    borderWidth: 1,
-    borderColor: Colors.error,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    justifyContent: 'center',
-  },
-  logoutText: { color: Colors.error, fontSize: FontSize.md, fontWeight: FontWeight.semibold },
-
-  // Delete account
-  deleteAccountBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    backgroundColor: Colors.errorMuted,
-    borderWidth: 1,
-    borderColor: Colors.error,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    justifyContent: 'center',
-  },
-  deleteAccountText: { color: Colors.error, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
+  // (logoutBtn and deleteAccountBtn replaced by inline menuRow styling)
   deleteAccountHint: {
     color: Colors.textMuted,
     fontSize: FontSize.xs,
