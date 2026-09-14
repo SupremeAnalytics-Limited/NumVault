@@ -5,7 +5,7 @@ const config = getDefaultConfig(__dirname);
 
 // Increment this string whenever a build server cache issue needs busting
 // (e.g. stale Sentry Metro serializer injection from a removed plugin).
-config.cacheVersion = 'numvault-clean-v3';
+config.cacheVersion = 'numvault-clean-v4';
 
 // ── Compatibility shim ────────────────────────────────────────────────────────
 // metro/src/lib/createModuleIdFactory was removed in Metro 0.73+, but the

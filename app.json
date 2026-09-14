@@ -25,7 +25,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "ng.numvault.app",
-      "versionCode": 17,
+      "versionCode": 18,
       "enableShrinkResourcesInReleaseBuilds": false,
       "enableProguardInReleaseBuilds": false
     },
@@ -35,6 +35,7 @@
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
+      "./plugins/fixMetroModuleIdFactory",
       "./plugins/removeStaleOnboardingAssets",
       "expo-router",
       [
