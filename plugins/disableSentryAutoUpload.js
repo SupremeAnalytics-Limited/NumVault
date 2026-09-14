@@ -3,23 +3,23 @@
  *
  * Problem
  * -------
- * @sentry/react-native ships a Gradle plugin that auto-registers a
- * `createBundleReleaseJsAndAssets_SentryUpload_*` task which tries to run
- * sentry-cli for source-map / ProGuard / native-symbol uploads.
- * On the OnSpace build server sentry-cli is not installed, so the task
- * crashes the build with:
+ * @sentry/react-native ships a React Native Gradle plugin that auto-registers
+ * a `createBundleReleaseJsAndAssets_SentryUpload_*` task which tries to run
+ * sentry-cli for source-map uploads. On the OnSpace build server sentry-cli
+ * is not installed, so the task crashes the build with:
  *   "A problem occurred starting process 'command '.../sentry-cli'"
  *
- * The environment variable SENTRY_DISABLE_AUTO_UPLOAD is already set as a
- * Cloud Secret but there is no sentry.gradle in this project (the Expo
- * Sentry config-plugin was intentionally removed), so the variable is
- * never read and the upload task still runs.
+ * Previous attempt injected a `sentry { ... }` DSL block intended for the
+ * Android Sentry Gradle plugin (io.sentry.android.gradle), but that plugin
+ * is NOT applied in this project. Only the React Native Gradle plugin is
+ * active, and it does not expose a `sentry {}` extension — so Gradle threw:
+ *   "Could not find method sentry() for arguments ... on project ':app'"
  *
  * Fix
  * ---
- * Inject a `sentry { ... }` DSL block into app/build.gradle immediately
- * after the `android { }` close.  This is the canonical way to disable
- * Sentry's Gradle upload tasks without touching the Sentry SDK itself.
+ * Inject a `tasks.whenTaskAdded` hook that sets `enabled = false` on any task
+ * whose name contains 'SentryUpload'. This directly targets the problematic
+ * task without requiring any specific Gradle plugin extension to be present.
  */
 
 const { withAppBuildGradle } = require(
@@ -28,18 +28,19 @@ const { withAppBuildGradle } = require(
   })
 );
 
-const GUARD = 'disableSentryAutoUpload_v1';
+const GUARD = 'disableSentryAutoUpload_v2';
 
 const GRADLE_BLOCK = `
-// ── disableSentryAutoUpload_v1 ───────────────────────────────────────────────
-// Disables sentry-cli source-map / ProGuard / native-symbol upload tasks.
-// sentry-cli is not available on the OnSpace build server, and uploads are
+// ── disableSentryAutoUpload_v2 ───────────────────────────────────────────────
+// Disables Sentry source-map / symbol upload tasks.
+// sentry-cli is not available on the OnSpace build server; uploads are
 // handled manually via sentry-cli after builds complete.
-sentry {
-    autoUploadProguardMapping = false
-    uploadNativeSymbols = false
-    autoInstallation {
-        enabled = false
+// Uses tasks.whenTaskAdded (no plugin extension required) to directly disable
+// any SentryUpload task registered by @sentry/react-native's Gradle plugin.
+tasks.whenTaskAdded { task ->
+    if (task.name.contains('SentryUpload')) {
+        task.enabled = false
+        println "disableSentryAutoUpload: disabled task \${task.name}"
     }
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -54,8 +55,14 @@ module.exports = function disableSentryAutoUpload(config) {
       return mod;
     }
 
+    // Remove any leftover v1 injection (wrong sentry{} DSL block)
+    const cleaned = gradle.replace(
+      /\/\/ ── disableSentryAutoUpload_v1[\s\S]*?\/\/ ─+\n/,
+      ''
+    );
+
     // Append after the closing brace of the android {} block
-    mod.modResults.contents = gradle.replace(
+    mod.modResults.contents = cleaned.replace(
       /^(android \{[\s\S]*?\n\})/m,
       `$1\n${GRADLE_BLOCK}`
     );
