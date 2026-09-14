@@ -1,77 +1,260 @@
 /**
- * NumVault — Sentry observability service (stub)
+ * NumVault — Sentry observability service
  *
- * @sentry/react-native cannot be installed in the OnSpace build environment
- * because its postinstall script calls @expo/config before `expo` is
- * resolvable, which causes a ConfigError at install time.
+ * All structured product-telemetry calls go through this module.
+ * Sentry is initialised once in app/_layout.tsx; this file adds
+ * breadcrumbs, user context, and captures errors for key user journeys.
  *
- * All functions are no-ops so every call site compiles and runs unchanged.
- * When Sentry becomes available outside this environment, replace this file
- * with the real implementation (preserved in docs/sentry.md).
- *
- * Privacy rules still documented here for future implementation:
- *  - No passwords, OTPs, card numbers, CVV, or Paystack auth codes
- *  - No full phone numbers (purchased temporary numbers are NEVER sent)
- *  - No wallet credentials or API keys
- *  - User is identified by internal ID only
+ * Privacy rules (strictly enforced):
+ *  - NEVER send: passwords, OTPs, card numbers/CVV, Paystack auth codes
+ *  - NEVER send purchased temporary phone numbers (use orderId only)
+ *  - NEVER send wallet credentials or private API keys
+ *  - User is identified by internal UUID only (no email, no name)
  */
+
+import * as Sentry from '@sentry/react-native';
 
 // ─── User context ─────────────────────────────────────────────────────────────
 
-export function setSentryUser(_userId: string) { /* stub */ }
-export function clearSentryUser() { /* stub */ }
+/** Call after login/signup with the internal Supabase user ID only. */
+export function setSentryUser(userId: string) {
+  Sentry.setUser({ id: userId });
+}
+
+/** Call on logout and account deletion to stop associating events with the user. */
+export function clearSentryUser() {
+  Sentry.setUser(null);
+}
 
 // ─── Auth events ──────────────────────────────────────────────────────────────
 
-export function trackSignupStarted() { /* stub */ }
-export function trackSignupOtpSent(_success: boolean, _errorMessage?: string) { /* stub */ }
-export function trackSignupCompleted(_userId: string) { /* stub */ }
-export function trackSignupFailed(_reason: string) { /* stub */ }
-export function trackLoginStarted() { /* stub */ }
-export function trackLoginCompleted(_userId: string) { /* stub */ }
-export function trackLoginFailed(_reason: string) { /* stub */ }
-export function trackOnboardingCompleted() { /* stub */ }
-export function trackLogout() { /* stub */ }
-export function trackAccountDeleted() { /* stub */ }
+export function trackSignupStarted() {
+  Sentry.addBreadcrumb({ category: 'auth', message: 'signup_started', level: 'info' });
+}
 
-// ─── Number search / service browse events ────────────────────────────────────
+export function trackSignupOtpSent(success: boolean, errorMessage?: string) {
+  Sentry.addBreadcrumb({
+    category: 'auth',
+    message: success ? 'signup_otp_sent' : 'signup_otp_failed',
+    level: success ? 'info' : 'warning',
+    data: success ? undefined : { reason: errorMessage },
+  });
+}
 
-export function trackSearchStarted(_query: string) { /* stub */ }
-export function trackServiceSelected(_serviceName: string, _provider: string) { /* stub */ }
+export function trackSignupCompleted(userId: string) {
+  setSentryUser(userId);
+  Sentry.addBreadcrumb({ category: 'auth', message: 'signup_completed', level: 'info' });
+}
 
-// ─── Checkout / purchase events ───────────────────────────────────────────────
+export function trackSignupFailed(reason: string) {
+  Sentry.addBreadcrumb({ category: 'auth', message: 'signup_failed', level: 'error', data: { reason } });
+}
 
-export function trackCheckoutOpened(_serviceName: string, _priceNgn: number, _fromWallet: boolean) { /* stub */ }
-export function trackPurchaseInitiated(_serviceName: string, _priceNgn: number, _method: 'wallet' | 'paystack') { /* stub */ }
-export function trackPaymentSucceeded(_priceNgn: number, _method: 'wallet' | 'paystack') { /* stub */ }
-export function trackPaymentFailed(_reason: string, _method: 'wallet' | 'paystack') { /* stub */ }
-export function trackPurchaseSucceeded(_serviceName: string, _orderId: string) { /* stub */ }
-export function trackPurchaseFailed(_serviceName: string, _reason: string) { /* stub */ }
-export function trackCheckoutCompleted(_serviceName: string, _priceNgn: number) { /* stub */ }
+export function trackLoginStarted() {
+  Sentry.addBreadcrumb({ category: 'auth', message: 'login_started', level: 'info' });
+}
 
-// ─── Wallet events ────────────────────────────────────────────────────────────
+export function trackLoginCompleted(userId: string) {
+  setSentryUser(userId);
+  Sentry.addBreadcrumb({ category: 'auth', message: 'login_completed', level: 'info' });
+}
 
-export function trackWalletTopupInitiated(_amountNgn: number, _method: 'saved_card' | 'paystack') { /* stub */ }
-export function trackWalletTopupCompleted(_amountNgn: number) { /* stub */ }
-export function trackWalletTopupFailed(_reason: string) { /* stub */ }
+export function trackLoginFailed(reason: string) {
+  Sentry.addBreadcrumb({ category: 'auth', message: 'login_failed', level: 'error', data: { reason } });
+}
 
-// ─── Refund events ────────────────────────────────────────────────────────────
+export function trackOnboardingCompleted() {
+  Sentry.addBreadcrumb({ category: 'auth', message: 'onboarding_completed', level: 'info' });
+}
 
-export function trackRefundInitiated(_orderId: string) { /* stub */ }
-export function trackRefundCompleted(_orderId: string, _amountNgn: number) { /* stub */ }
-export function trackRefundFailed(_orderId: string, _reason?: string) { /* stub */ }
+export function trackLogout() {
+  Sentry.addBreadcrumb({ category: 'auth', message: 'logout', level: 'info' });
+  clearSentryUser();
+}
 
-// ─── Order status events ──────────────────────────────────────────────────────
+export function trackAccountDeleted() {
+  Sentry.addBreadcrumb({ category: 'auth', message: 'account_deleted', level: 'info' });
+  clearSentryUser();
+}
 
-export function trackOrderStatusChange(_orderId: string, _newStatus: string) { /* stub */ }
-export function trackOtpReceived(_orderId: string) { /* stub */ }
-export function trackOtpTimeout(_orderId: string) { /* stub */ }
+// ─── Number search / service browse ───────────────────────────────────────────
 
-// ─── Support interaction ──────────────────────────────────────────────────────
+/** Only the query length is sent — never the query string content. */
+export function trackSearchStarted(query: string) {
+  Sentry.addBreadcrumb({
+    category: 'browse',
+    message: 'number_search_started',
+    level: 'info',
+    data: { query_length: query.length },
+  });
+}
 
-export function trackSupportInteraction(_source: string) { /* stub */ }
+export function trackServiceSelected(serviceName: string, provider: string) {
+  Sentry.addBreadcrumb({
+    category: 'browse',
+    message: 'number_selected',
+    level: 'info',
+    data: { service: serviceName, provider },
+  });
+}
+
+// ─── Checkout / purchase ──────────────────────────────────────────────────────
+
+export function trackCheckoutOpened(serviceName: string, priceNgn: number, fromWallet: boolean) {
+  Sentry.addBreadcrumb({
+    category: 'checkout',
+    message: 'checkout_opened',
+    level: 'info',
+    data: { service: serviceName, price_ngn: priceNgn, from_wallet: fromWallet },
+  });
+}
+
+export function trackPurchaseInitiated(serviceName: string, priceNgn: number, method: 'wallet' | 'paystack') {
+  Sentry.addBreadcrumb({
+    category: 'checkout',
+    message: 'purchase_initiated',
+    level: 'info',
+    data: { service: serviceName, price_ngn: priceNgn, method },
+  });
+}
+
+export function trackPaymentSucceeded(priceNgn: number, method: 'wallet' | 'paystack') {
+  Sentry.addBreadcrumb({
+    category: 'checkout',
+    message: 'payment_succeeded',
+    level: 'info',
+    data: { price_ngn: priceNgn, method },
+  });
+}
+
+export function trackPaymentFailed(reason: string, method: 'wallet' | 'paystack') {
+  Sentry.addBreadcrumb({
+    category: 'checkout',
+    message: 'payment_failed',
+    level: 'error',
+    data: { reason, method },
+  });
+}
+
+export function trackPurchaseSucceeded(serviceName: string, orderId: string) {
+  Sentry.addBreadcrumb({
+    category: 'checkout',
+    message: 'purchase_succeeded',
+    level: 'info',
+    data: { service: serviceName, order_id: orderId },
+  });
+}
+
+export function trackPurchaseFailed(serviceName: string, reason: string) {
+  Sentry.addBreadcrumb({
+    category: 'checkout',
+    message: 'purchase_failed',
+    level: 'error',
+    data: { service: serviceName, reason },
+  });
+}
+
+export function trackCheckoutCompleted(serviceName: string, priceNgn: number) {
+  Sentry.addBreadcrumb({
+    category: 'checkout',
+    message: 'checkout_completed',
+    level: 'info',
+    data: { service: serviceName, price_ngn: priceNgn },
+  });
+}
+
+// ─── Wallet ───────────────────────────────────────────────────────────────────
+
+export function trackWalletTopupInitiated(amountNgn: number, method: 'saved_card' | 'paystack') {
+  Sentry.addBreadcrumb({
+    category: 'wallet',
+    message: 'topup_initiated',
+    level: 'info',
+    data: { amount_ngn: amountNgn, method },
+  });
+}
+
+export function trackWalletTopupCompleted(amountNgn: number) {
+  Sentry.addBreadcrumb({
+    category: 'wallet',
+    message: 'topup_completed',
+    level: 'info',
+    data: { amount_ngn: amountNgn },
+  });
+}
+
+export function trackWalletTopupFailed(reason: string) {
+  Sentry.addBreadcrumb({
+    category: 'wallet',
+    message: 'topup_failed',
+    level: 'error',
+    data: { reason },
+  });
+}
+
+// ─── Refunds ──────────────────────────────────────────────────────────────────
+
+export function trackRefundInitiated(orderId: string) {
+  Sentry.addBreadcrumb({ category: 'refund', message: 'refund_initiated', level: 'info', data: { order_id: orderId } });
+}
+
+export function trackRefundCompleted(orderId: string, amountNgn: number) {
+  Sentry.addBreadcrumb({
+    category: 'refund',
+    message: 'refund_completed',
+    level: 'info',
+    data: { order_id: orderId, amount_ngn: amountNgn },
+  });
+}
+
+export function trackRefundFailed(orderId: string, reason?: string) {
+  Sentry.addBreadcrumb({
+    category: 'refund',
+    message: 'refund_failed',
+    level: 'error',
+    data: { order_id: orderId, reason },
+  });
+}
+
+// ─── Order / OTP status ───────────────────────────────────────────────────────
+
+export function trackOrderStatusChange(orderId: string, newStatus: string) {
+  Sentry.addBreadcrumb({
+    category: 'order',
+    message: 'order_status_change',
+    level: 'info',
+    data: { order_id: orderId, status: newStatus },
+  });
+}
+
+export function trackOtpReceived(orderId: string) {
+  // orderId only — never the actual OTP value
+  Sentry.addBreadcrumb({ category: 'order', message: 'otp_received', level: 'info', data: { order_id: orderId } });
+}
+
+export function trackOtpTimeout(orderId: string) {
+  Sentry.addBreadcrumb({ category: 'order', message: 'otp_timeout', level: 'warning', data: { order_id: orderId } });
+}
+
+// ─── Support ──────────────────────────────────────────────────────────────────
+
+export function trackSupportInteraction(source: string) {
+  Sentry.addBreadcrumb({ category: 'support', message: 'support_opened', level: 'info', data: { source } });
+}
 
 // ─── Error capturing ──────────────────────────────────────────────────────────
 
-export function captureError(_error: unknown, _context?: Record<string, unknown>) { /* stub */ }
-export function captureMessage(_message: string, _level?: string) { /* stub */ }
+/**
+ * Capture a caught exception with optional non-sensitive context.
+ * Never pass passwords, OTPs, card data, or Paystack auth codes as context.
+ */
+export function captureError(error: unknown, context?: Record<string, unknown>) {
+  Sentry.withScope((scope) => {
+    if (context) scope.setExtras(context);
+    Sentry.captureException(error);
+  });
+}
+
+export function captureMessage(message: string, level: Sentry.SeverityLevel = 'info') {
+  Sentry.captureMessage(message, level);
+}

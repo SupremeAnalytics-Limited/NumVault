@@ -4,89 +4,100 @@
 
 | Area | Status |
 |---|---|
-| SDK installed (`@sentry/react-native`) | ❌ Cannot install in OnSpace (postinstall conflict) |
-| `sentryService.ts` call sites preserved (stubs) | ✅ All functions are no-ops — zero call-site changes |
-| `Sentry.init()` in `app/_layout.tsx` | ❌ Removed (requires SDK) |
-| `@sentry/react-native/expo` plugin in `app.json` | ❌ Removed (causes install failure) |
-| `sentry.properties` (org/project for CLI uploads) | ✅ Present |
-| All event tracking functions | ✅ Stubbed — ready to activate once SDK installs |
+| SDK (`@sentry/react-native`) | ✅ Real implementation — imported in `_layout.tsx` and `sentryService.ts` |
+| `Sentry.init()` in `app/_layout.tsx` | ✅ Configured with tracing, replay, beforeSend, beforeBreadcrumb |
+| `Sentry.wrap(RootLayout)` | ✅ Root component wrapped for crash boundary |
+| Navigation instrumentation | ✅ `reactNativeTracingIntegration` + `useNavigationContainerRef` |
+| Session Replay | ✅ `mobileReplayIntegration` — `maskAllText: true`, `maskAllImages: true` |
+| All product event tracking | ✅ Real `Sentry.addBreadcrumb()` calls in `sentryService.ts` |
+| User context (login/logout) | ✅ `Sentry.setUser({ id })` / `Sentry.setUser(null)` |
+| `@sentry/react-native/expo` config plugin | ❌ NOT in `app.json` — see note below |
+| `EXPO_PUBLIC_SENTRY_DSN` secret | ✅ Configured in OnSpace Cloud Secrets |
 
 ---
 
-## Expo Config Plugin
+## Important: Expo Config Plugin Not Used
 
-The `@sentry/react-native/expo` Expo config plugin is included in `app.json` with:
-- `organization: supremeanalytics`
-- `project: numvault`
-- `enableMetroModuleIdFactory: false` — disables the legacy Metro internal API usage that caused the `Cannot find module 'metro/src/lib/createModuleIdFactory'` build failure
+The `@sentry/react-native/expo` Expo config plugin is intentionally absent from `app.json`.
 
-Without `enableMetroModuleIdFactory: false`, the plugin's auto-discovered Metro serializer attempts to import the removed `metro/src/lib/createModuleIdFactory` internal path (removed in Metro 0.80+), which crashes `createBundleReleaseJsAndAssets` before any JS is produced.
+**Why:** The plugin's postinstall script calls `@expo/config` to auto-detect the Expo SDK version. In OnSpace's package-install environment, the `expo` module is not resolvable during `npm install`, causing:
 
----
-
-## Step 1: DSN
-
-`EXPO_PUBLIC_SENTRY_DSN` is configured in OnSpace Cloud Secrets and automatically injected into the build. No manual `.env` change required.
-
-To find your DSN: https://sentry.io/settings/supremeanalytics/projects/numvault/keys/
-
----
-
-## Step 2: Verify It Works
-
-In any screen, temporarily add a test capture (remove after testing):
-
-```typescript
-import * as Sentry from '@sentry/react-native';
-Sentry.captureException(new Error('[NumVault TEST] Sentry working'));
+```
+ConfigError: Cannot determine the project's Expo SDK version
+because the module 'expo' is not installed.
 ```
 
-Open https://sentry.io/organizations/supremeanalytics/projects/numvault/ and confirm the event appears under **Issues**.
+This failure is environment-level and cannot be worked around by pinning a version or skipping scripts from within this editor.
+
+**What this means in practice:**
+- `Sentry.init()`, tracing, replay, user context, and all breadcrumb events work correctly at runtime — the SDK itself is installed and functional
+- Source maps and native debug symbols are **not** auto-uploaded during EAS builds (the plugin handles this; doing it without the plugin requires manual CLI steps below)
+- The `Cannot find module 'metro/src/lib/createModuleIdFactory'` build crash that occurred when the plugin was previously added is avoided
 
 ---
 
-## Environments and Release
+## Known Installation Limitation
 
-| Environment | `__DEV__` | Traces sample rate | Replay |
-|---|---|---|---|
-| Development | `true` | 100% | Disabled |
-| Production | `false` | 20% | 10% sessions, 100% on error |
+If OnSpace's dependency resolver attempts to re-install `@sentry/react-native` (e.g. after a clean environment rebuild), the postinstall script will fail. The package is already present in the project's dependency graph via earlier installation. If a fresh install is forced, the build will fail at the npm install step with the ConfigError above.
+
+**Resolution if this occurs:** The only fix that works outside this editor is to install the package with `--ignore-scripts` in a local development environment and commit the result, or to wait for a version of `@sentry/react-native` that removes the postinstall Expo SDK detection.
+
+---
+
+## DSN
+
+`EXPO_PUBLIC_SENTRY_DSN` is configured in OnSpace Cloud Secrets and automatically injected into the build as an environment variable. No `.env` change is needed.
+
+To find or rotate the DSN: https://sentry.io/settings/supremeanalytics/projects/numvault/keys/
+
+---
+
+## Release Identification
 
 Release is set manually in `app/_layout.tsx`:
+
 ```typescript
-release: 'ng.numvault.app@1.0.4+15',
+const SENTRY_RELEASE = 'ng.numvault.app@1.0.4+15';
 ```
 
-**When you bump `version` or `versionCode` in `app.json`, update this string to match.**
+**When you bump `version` or `versionCode` in `app.json`, update this string.**
 
 Format: `{android.package}@{version}+{versionCode}`
-Example for 1.0.5 / versionCode 16: `ng.numvault.app@1.0.5+16`
+
+| app.json | SENTRY_RELEASE |
+|---|---|
+| version: 1.0.4, versionCode: 15 | `ng.numvault.app@1.0.4+15` |
+| version: 1.0.5, versionCode: 16 | `ng.numvault.app@1.0.5+16` |
 
 ---
 
-## Source Maps (Production JavaScript Errors)
+## Environments
 
-Without source-map upload, production JS errors show minified stack traces. Upload after each production build:
+| Condition | `environment` | Traces sample rate | Replay |
+|---|---|---|---|
+| `__DEV__ === true` | `development` | 100% | Disabled |
+| `__DEV__ === false` | `production` | 20% | 10% sessions, 100% on error |
 
-### Prerequisites
+---
 
-The `@sentry/react-native/expo` plugin automatically uploads source maps during EAS builds **if** `SENTRY_AUTH_TOKEN` is set as a build secret.
+## Source Maps (Required for Readable Production Stack Traces)
 
-1. Get a token at: https://sentry.io/settings/account/api/auth-tokens/  
+Without source-map upload, production JS errors show minified stack traces.
+
+### Manual upload after each production build
+
+**Prerequisites:**
+1. Install `sentry-cli`: `npm install --save-dev @sentry/cli`
+2. Get auth token at: https://sentry.io/settings/account/api/auth-tokens/  
    Required scopes: `project:releases`, `org:read`
-2. Add it to OnSpace Cloud Secrets as `SENTRY_AUTH_TOKEN` (**never commit this token**)
+3. Set env var: `export SENTRY_AUTH_TOKEN=your_token_here`  
+   **Never commit this token to GitHub.**
 
-For manual CLI uploads:  
-```bash
-npm install --save-dev @sentry/cli
-export SENTRY_AUTH_TOKEN=your_token_here
-```
+The `sentry.properties` in the project root already declares `org=supremeanalytics` and `project=numvault`, so `--org` and `--project` flags are optional.
 
 ### Upload JavaScript source maps
 ```bash
 npx sentry-cli releases \
-  --org supremeanalytics \
-  --project numvault \
   files "ng.numvault.app@1.0.4+15" \
   upload-sourcemaps ./dist \
   --rewrite
@@ -94,21 +105,13 @@ npx sentry-cli releases \
 
 ### Upload Android native symbols (after AAB build)
 ```bash
-npx sentry-cli upload-dif \
-  --org supremeanalytics \
-  --project numvault \
-  ./android/app/build
+npx sentry-cli upload-dif ./android/app/build
 ```
 
-### Upload iOS dSYMs (after IPA build)
+### Upload iOS dSYMs (after IPA/Archive build)
 ```bash
-npx sentry-cli upload-dif \
-  --org supremeanalytics \
-  --project numvault \
-  ~/Library/Developer/Xcode/DerivedData
+npx sentry-cli upload-dif ~/Library/Developer/Xcode/DerivedData
 ```
-
-The `sentry.properties` file in the project root already contains `org=supremeanalytics` and `project=numvault`, so `sentry-cli` will pick these up automatically without the `--org` and `--project` flags.
 
 ---
 
@@ -117,63 +120,86 @@ The `sentry.properties` file in the project root already contains `org=supremean
 ### Session Replay
 ```typescript
 Sentry.mobileReplayIntegration({
-  maskAllText: true,   // ALL text masked — OTPs, amounts, phone numbers, passwords
-  maskAllImages: true, // ALL images blocked
+  maskAllText: true,   // All text masked — OTPs, amounts, phone numbers, passwords
+  maskAllImages: true, // All images blocked
 })
 ```
+
+### `beforeSend` hook
+Strips event `extra` keys whose name contains: `password`, `otp`, `token`, `auth_code`, `card`, `cvv`, `secret`
+
+### `beforeBreadcrumb` hook
+Drops console breadcrumbs whose message contains any of those same keywords.
 
 ### Data Never Sent to Sentry
 - Passwords and OTP codes
 - Paystack authorization codes, card numbers, CVV
-- Purchased temporary phone numbers (order_id only)
-- User email (internal `user_id` only via `Sentry.setUser({ id })`)
+- Purchased temporary phone numbers (`order_id` only — the number itself is never sent)
+- User email (internal `user_id` UUID only)
 - Wallet credentials or API keys
-
-### `beforeSend` hook
-Strips event `extra` keys containing: `password`, `otp`, `token`, `auth_code`, `card`, `cvv`, `secret`
-
-### `beforeBreadcrumb` hook
-Drops console breadcrumbs whose message contains those same keywords.
 
 ---
 
 ## User Context
 
-| Event | Action |
+| Event | Sentry action |
 |---|---|
-| Login | `setSentryUser(userId)` — internal UUID only |
-| Signup | `setSentryUser(userId)` — internal UUID only |
-| Logout | `clearSentryUser()` |
-| Account deletion | `clearSentryUser()` |
+| Login | `Sentry.setUser({ id: userId })` — internal UUID only |
+| Signup | `Sentry.setUser({ id: userId })` — internal UUID only |
+| Logout | `Sentry.setUser(null)` |
+| Account deletion | `Sentry.setUser(null)` |
 
-Note: If the app resumes from background with an existing session (no login event fired), Sentry user context is unset until the next explicit login. To fix this permanently, call `setSentryUser(user.id)` from the `onAuthStateChange` listener in the auth provider.
+**Gap:** If the app resumes with an existing session (no explicit login event), Sentry user context is unset until the next login. To close this, call `setSentryUser(user.id)` from the `onAuthStateChange` listener in `template/auth/supabase/context.tsx`.
 
 ---
 
-## Instrumented Events
+## Instrumented Events (via `services/sentryService.ts`)
 
-All events use `Sentry.addBreadcrumb()`. They appear in breadcrumb trails in Sentry Issues and attach to replays.
+All events use `Sentry.addBreadcrumb()` — they appear in breadcrumb trails on Issues and attach to Session Replays.
 
 ### Auth
-`signup_started` → `signup_otp_sent` → `signup_completed` / `signup_failed`
-`login_started` → `login_completed` / `login_failed`
+`signup_started` → `signup_otp_sent` / `signup_otp_failed` → `signup_completed` / `signup_failed`  
+`login_started` → `login_completed` / `login_failed`  
 `logout`, `onboarding_completed`, `account_deleted`
 
-### Search / Browse
-`number_search_started` (query_length only, not content), `number_selected`
+### Browse
+`number_search_started` (query_length only, not the query string), `number_selected`
 
 ### Checkout / Purchase
-`checkout_opened`, `purchase_initiated`, `payment_succeeded`, `payment_failed`
+`checkout_opened`, `purchase_initiated`, `payment_succeeded`, `payment_failed`  
 `purchase_succeeded`, `purchase_failed`, `checkout_completed`
 
 ### Wallet
 `topup_initiated`, `topup_completed`, `topup_failed`
 
 ### Order / OTP
-`otp_received`, `otp_timeout`, `order_status_change`, `refund_initiated`, `refund_completed`, `refund_failed`
+`otp_received`, `otp_timeout`, `order_status_change`
+
+### Refund
+`refund_initiated`, `refund_completed`, `refund_failed`
 
 ### Support
 `support_opened`
+
+---
+
+## Controlled Test (Verify Events Reach Sentry)
+
+Add temporarily in any screen, then remove after confirming:
+
+```typescript
+import { captureMessage } from '@/services/sentryService';
+captureMessage('[NumVault TEST] Sentry is working', 'info');
+```
+
+Or force a captured exception:
+
+```typescript
+import { captureError } from '@/services/sentryService';
+captureError(new Error('[NumVault TEST] controlled test error'));
+```
+
+Open https://sentry.io/organizations/supremeanalytics/projects/numvault/ → Issues.
 
 ---
 
@@ -181,20 +207,21 @@ All events use `Sentry.addBreadcrumb()`. They appear in breadcrumb trails in Sen
 
 All existing build fixes are preserved:
 - `assetBundlePatterns` explicit list intact — no `**/*` wildcard
-- `removeStaleOnboardingAssets` Gradle plugin is first in `plugins[]` — runs before Sentry plugin
-- `metro.config.js` is the clean Expo default (Sentry Metro serializer is disabled via `enableMetroModuleIdFactory: false`)
-- `babel.config.js` preserves `nv-build-9` cache-bust comment
-- `enableMetroModuleIdFactory: false` prevents Sentry from injecting the legacy Metro internal that broke `createBundleReleaseJsAndAssets`
+- `removeStaleOnboardingAssets` Gradle plugin is first in `plugins[]`
+- `metro.config.js` is the clean Expo default
+- `babel.config.js` preserves `nv-build-9` cache-bust comment  
+- `@sentry/react-native/expo` plugin is **absent** from `app.json` — avoids Metro internal crash
 
 ---
 
 ## Adding New Events (Future Developers)
 
 1. Add a `track*` function to `services/sentryService.ts`
-2. Use `Sentry.addBreadcrumb()` for user-journey steps
+2. Use `Sentry.addBreadcrumb()` for user-journey milestones
 3. Use `captureError(error, context)` for caught exceptions with non-sensitive context
-4. **Never include** passwords, OTPs, phone numbers, card data, or Paystack auth codes
-5. Test in development — events appear in Sentry with `environment: development`
+4. Use `captureMessage(msg, level)` for important application state messages
+5. **Never include** passwords, OTPs, phone numbers, card data, or Paystack auth codes
+6. Test in development — events appear in Sentry with `environment: development`
 
 ---
 
@@ -202,8 +229,7 @@ All existing build fixes are preserved:
 
 | File | Purpose |
 |---|---|
-| `app/_layout.tsx` | `Sentry.init()` + `Sentry.wrap()` — single init point |
-| `services/sentryService.ts` | All structured event tracking functions |
-| `sentry.properties` | Org/project config for `sentry-cli` uploads |
+| `app/_layout.tsx` | `Sentry.init()` + `Sentry.wrap()` — single initialisation point |
+| `services/sentryService.ts` | All structured product event tracking |
+| `sentry.properties` | Org/project metadata for `sentry-cli` uploads |
 | `docs/sentry.md` | This document |
-| `.env` | `EXPO_PUBLIC_SENTRY_DSN=...` **(you must add this)** |
