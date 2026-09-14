@@ -30,7 +30,7 @@ const { withAppBuildGradle } = require(
 );
 
 const GRADLE_TASK = `
-// ── fixMetroModuleIdFactory ──────────────────────────────────────────────────
+// ── fixMetroModuleIdFactory_v2 ──────────────────────────────────────────────
 // metro/src/lib/createModuleIdFactory was removed in Metro 0.73+ but an older
 // metro-config pulled in by @expo/cli still requires it at Node.js startup —
 // before Metro ever reads metro.config.js (so resolver.extraNodeModules is
@@ -79,20 +79,20 @@ tasks.whenTaskAdded { task ->
 // ─────────────────────────────────────────────────────────────────────────────
 `;
 
-const GUARD = 'fixMetroModuleIdFactory';
+const GUARD = 'fixMetroModuleIdFactory_v2';
 
 module.exports = function fixMetroModuleIdFactory(config) {
   return withAppBuildGradle(config, (mod) => {
     const gradle = mod.modResults.contents;
 
-    // Idempotency guard — only inject once
-    if (gradle.includes(GUARD)) {
+    // Idempotency guard — only inject once (v2 = after android{} not inside it)
+    if (gradle.includes(GUARD + '_v2')) {
       return mod;
     }
 
     mod.modResults.contents = gradle.replace(
-      /^(android \{[\s\S]*?)(\n\})\s*$/m,
-      `$1\n${GRADLE_TASK}\n$2`
+      /^(android \{[\s\S]*?\n\})/m,
+      `$1\n${GRADLE_TASK}`
     );
 
     return mod;

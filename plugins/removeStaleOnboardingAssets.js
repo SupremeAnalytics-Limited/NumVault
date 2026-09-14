@@ -22,7 +22,7 @@ const { withAppBuildGradle } = require(
 );
 
 const GRADLE_TASK = `
-// ── removeStaleOnboardingAssets ──────────────────────────────────────────────
+// ── removeStaleOnboardingAssets_v2 ─────────────────────────────────────────
 // Deletes stale onboarding1/2/3 drawable files that the build server's cache
 // injects via createBundleReleaseJsAndAssets before mergeReleaseResources runs.
 tasks.register('removeStaleOnboardingAssets') {
@@ -69,14 +69,14 @@ module.exports = function removeStaleOnboardingAssets(config) {
     const gradle = mod.modResults.contents;
 
     // Idempotency guard — only inject once
-    if (gradle.includes('removeStaleOnboardingAssets')) {
+    if (gradle.includes('removeStaleOnboardingAssets_v2')) {
       return mod;
     }
 
     // Append before the last closing brace of the android {} block
     mod.modResults.contents = gradle.replace(
-      /^(android \{[\s\S]*?)(\n\})\s*$/m,
-      `$1\n${GRADLE_TASK}\n$2`
+      /^(android \{[\s\S]*?\n\})/m,
+      `$1\n${GRADLE_TASK}`
     );
 
     return mod;
