@@ -25,9 +25,9 @@ Sentry is integrated into NumVault via `@sentry/react-native`. It provides crash
 
 ## Source Maps and Native Symbols
 
-- The `@sentry/react-native/expo` Expo config plugin in `app.json` automatically handles JavaScript bundle source-map generation and upload during EAS/Expo builds.
-- Native debug symbols (dSYMs for iOS, ProGuard/NDK for Android) are uploaded by the same plugin.
-- Source maps are uploaded using the `SENTRY_AUTH_TOKEN` environment variable — **this must be set in your EAS build environment secrets, not committed to git**.
+- The `@sentry/react-native` SDK is initialised directly in `app/_layout.tsx` without the `@sentry/react-native/expo` Expo config plugin (the plugin triggers a postinstall script that requires `expo` to be resolvable at install time, which is incompatible with the OnSpace build environment).
+- Source maps can be uploaded manually via the Sentry CLI after each EAS build if symbolication is needed.
+- Native debug symbols (dSYMs / ProGuard) must be uploaded separately via `sentry-cli upload-dif`.
 
 ---
 

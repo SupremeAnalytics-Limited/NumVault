@@ -36,14 +36,6 @@
     },
     "plugins": [
       "./plugins/removeStaleOnboardingAssets",
-      [
-        "@sentry/react-native/expo",
-        {
-          "url": "https://sentry.io/",
-          "organization": "supremeanalytics",
-          "project": "numvault"
-        }
-      ],
       "expo-router",
       [
         "expo-splash-screen",
@@ -65,17 +57,6 @@
     ],
     "experiments": {
       "typedRoutes": true
-    },
-    "hooks": {
-      "postPublish": [
-        {
-          "file": "sentry-expo/upload-sourcemaps",
-          "config": {
-            "organization": "supremeanalytics",
-            "project": "numvault"
-          }
-        }
-      ]
     }
   }
 }
