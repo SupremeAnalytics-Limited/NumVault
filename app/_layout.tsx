@@ -19,10 +19,10 @@ import * as Notifications from 'expo-notifications';
 // Update this string whenever version/versionCode changes in app.json.
 const SENTRY_RELEASE = 'ng.numvault.app@1.0.4+15';
 
-// Store the tracing integration instance so we can register the nav container
-// on the same object that Sentry.init() received — calling the factory twice
-// creates two unrelated instances and navigation tracking silently breaks.
-const tracingIntegration = Sentry.reactNativeTracingIntegration();
+// navigationIntegration is the correct integration that exposes
+// registerNavigationContainer — reactNativeTracingIntegration() is for
+// general performance spans and does NOT have that method.
+const navigationIntegration = Sentry.reactNavigationIntegration();
 
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
@@ -41,7 +41,8 @@ Sentry.init({
       maskAllText: true,   // Masks OTPs, phone numbers, amounts, passwords
       maskAllImages: true, // Blocks all images in replays
     }),
-    tracingIntegration,
+    navigationIntegration,
+    Sentry.reactNativeTracingIntegration(), // general span / performance tracing
   ],
 
   // Strip sensitive keys from event payloads before they leave the device
@@ -93,10 +94,11 @@ function NotificationSetup() {
 function RootLayout() {
   const navigationRef = useNavigationContainerRef();
 
-  // Wire Sentry navigation instrumentation to the Expo Router nav container
+  // Wire Sentry navigation instrumentation to the Expo Router nav container.
+  // Guard against web/browser environments where the method may not exist.
   useEffect(() => {
-    if (navigationRef) {
-      tracingIntegration.registerNavigationContainer(navigationRef);
+    if (navigationRef && typeof navigationIntegration.registerNavigationContainer === 'function') {
+      navigationIntegration.registerNavigationContainer(navigationRef);
     }
   }, [navigationRef]);
 
