@@ -19,6 +19,11 @@ import * as Notifications from 'expo-notifications';
 // Update this string whenever version/versionCode changes in app.json.
 const SENTRY_RELEASE = 'ng.numvault.app@1.0.4+15';
 
+// Store the tracing integration instance so we can register the nav container
+// on the same object that Sentry.init() received — calling the factory twice
+// creates two unrelated instances and navigation tracking silently breaks.
+const tracingIntegration = Sentry.reactNativeTracingIntegration();
+
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
   release: SENTRY_RELEASE,
@@ -36,7 +41,7 @@ Sentry.init({
       maskAllText: true,   // Masks OTPs, phone numbers, amounts, passwords
       maskAllImages: true, // Blocks all images in replays
     }),
-    Sentry.reactNativeTracingIntegration(),
+    tracingIntegration,
   ],
 
   // Strip sensitive keys from event payloads before they leave the device
@@ -91,7 +96,7 @@ function RootLayout() {
   // Wire Sentry navigation instrumentation to the Expo Router nav container
   useEffect(() => {
     if (navigationRef) {
-      Sentry.reactNativeTracingIntegration().registerNavigationContainer(navigationRef);
+      tracingIntegration.registerNavigationContainer(navigationRef);
     }
   }, [navigationRef]);
 
@@ -102,10 +107,7 @@ function RootLayout() {
           <WalletProvider>
             <OrderProvider>
               <NotificationSetup />
-              <Stack
-                ref={navigationRef as any}
-                screenOptions={{ headerShown: false }}
-              >
+              <Stack screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="index" />
                 <Stack.Screen name="onboarding" />
                 <Stack.Screen name="login" />
