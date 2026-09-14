@@ -13,6 +13,11 @@ import { useOrders } from '@/hooks/useOrders';
 import { useWallet } from '@/hooks/useWallet';
 import { initializePayment, purchaseNumber } from '@/services/paystackService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
+import {
+  trackCheckoutOpened, trackPurchaseInitiated, trackPaymentSucceeded,
+  trackPaymentFailed, trackPurchaseSucceeded, trackPurchaseFailed,
+  trackCheckoutCompleted, captureError,
+} from '@/services/sentryService';
 import { PLATFORM_ICONS } from '@/constants/config';
 
 export default function CheckoutScreen() {
@@ -68,6 +73,7 @@ export default function CheckoutScreen() {
     setPurchaseError(null);
     setPurchaseStage('purchasing');
     setLoading(true);
+    trackPurchaseInitiated(params.project_name, price, fromWallet ? 'wallet' : 'paystack');
     try {
       const data = await purchaseNumber({
         provider_code: params.provider_code,
@@ -87,12 +93,17 @@ export default function CheckoutScreen() {
       await refreshProfile();
 
       const orderId = data?.data?.order?.id;
+      trackPaymentSucceeded(price, fromWallet ? 'wallet' : 'paystack');
+      trackPurchaseSucceeded(params.project_name, orderId || 'unknown');
+      trackCheckoutCompleted(params.project_name, price);
       if (orderId) {
         router.replace({ pathname: '/number-display', params: { order_id: orderId } });
       }
     } catch (e: any) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       const parsed = parsePurchaseError(e.message || 'Purchase failed. Please try again.');
+      trackPurchaseFailed(params.project_name, parsed.message);
+      captureError(e, { service: params.project_name, method: fromWallet ? 'wallet' : 'paystack', stage: 'purchase' });
       // If the server refunded the charge, surface that clearly
       if (e.refunded) {
         const amt = e.refund_amount ?? price;
@@ -113,6 +124,7 @@ export default function CheckoutScreen() {
 
     // ── Wallet-first: skip Paystack entirely if balance covers the price ──
     if (walletBalance >= price) {
+      trackCheckoutOpened(params.project_name, price, true);
       setPurchaseStage('purchasing');
       setLoading(true);
       await executePurchase(null, true);
@@ -132,6 +144,7 @@ export default function CheckoutScreen() {
       // wholesale_cost is passed so wallet-topup can apply an exact transaction_charge
       // (flat kobo amount = retail − wholesale) instead of relying on percentage_charge,
       // which can drift due to Math.ceil() rounding on the retail price.
+      trackCheckoutOpened(params.project_name, price, false);
       const data = await initializePayment(user?.email || '', price, 'number_purchase', {
         provider_code: params.provider_code,
         country_code: params.country_code,
@@ -146,6 +159,8 @@ export default function CheckoutScreen() {
       }
     } catch (e: any) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      trackPaymentFailed(e.message || 'Payment initialization failed', 'paystack');
+      captureError(e, { stage: 'payment_init', service: params.project_name });
       setPurchaseError({ message: e.message || 'Payment initialization failed. Please try again.' });
     } finally {
       setLoading(false);

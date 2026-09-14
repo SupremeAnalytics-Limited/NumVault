@@ -10,6 +10,10 @@ import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAuth, useAlert } from '@/template';
 import { waitForSession, setPasswordWithRetry } from '@/services/authHelpers';
+import {
+  trackSignupStarted, trackSignupOtpSent, trackSignupCompleted, trackSignupFailed,
+  trackLoginStarted, trackLoginCompleted, trackLoginFailed,
+} from '@/services/sentryService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
 type Mode = 'login' | 'register';
@@ -33,12 +37,15 @@ export default function LoginScreen() {
       return;
     }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    trackSignupStarted();
     const { error } = await sendOTP(email.trim().toLowerCase());
     if (error) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      trackSignupOtpSent(false, error);
       showAlert('Error', error);
     } else {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      trackSignupOtpSent(true);
       setOtpSent(true);
       showAlert('Code Sent', 'Check your email for the 4-digit verification code.');
     }
@@ -65,6 +72,7 @@ export default function LoginScreen() {
     const { error: verifyError } = await verifyOTPAndLogin(email.trim().toLowerCase(), otp);
     if (verifyError) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      trackSignupFailed(verifyError);
       showAlert('Registration Failed', verifyError);
       return;
     }
@@ -91,6 +99,8 @@ export default function LoginScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
     // Account is created and session is live — navigate to main app.
+    const { data: { session } } = await (await import('@/template')).getSupabaseClient().auth.getSession();
+    if (session?.user?.id) trackSignupCompleted(session.user.id);
     router.replace('/(tabs)');
   };
 
@@ -100,12 +110,15 @@ export default function LoginScreen() {
       return;
     }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const { error } = await signInWithPassword(email.trim().toLowerCase(), password);
+    trackLoginStarted();
+    const { error, user } = await signInWithPassword(email.trim().toLowerCase(), password);
     if (error) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      trackLoginFailed(error);
       showAlert('Login Failed', error);
     } else {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (user?.id) trackLoginCompleted(user.id);
       router.replace('/(tabs)');
     }
   };

@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/template';
+import { trackOnboardingCompleted } from '@/services/sentryService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
 const { width, height } = Dimensions.get('window');
@@ -44,7 +45,10 @@ export default function OnboardingScreen() {
   const { user } = useAuth();
 
   // If user is already signed in go straight to the app, otherwise go to login.
-  const finish = () => router.replace(user ? '/(tabs)' : '/login');
+  const finish = () => {
+    trackOnboardingCompleted();
+    router.replace(user ? '/(tabs)' : '/login');
+  };
 
   const goNext = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

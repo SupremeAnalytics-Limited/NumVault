@@ -13,6 +13,9 @@ import { useOrders } from '@/hooks/useOrders';
 import { initializePayment, chargeWithSavedCard } from '@/services/paystackService';
 import { requestNotificationPermissions, sendLowBalanceNotification } from '@/services/notificationService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
+import {
+  trackWalletTopupInitiated, trackWalletTopupCompleted, trackWalletTopupFailed, captureError,
+} from '@/services/sentryService';
 
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
@@ -64,6 +67,7 @@ export default function WalletScreen() {
     try {
       // Use saved card if available
       if (hasCard && profile?.card_auth_code) {
+        trackWalletTopupInitiated(amt, 'saved_card');
         const result = await chargeWithSavedCard(
           user?.email || '',
           amt,
@@ -72,6 +76,7 @@ export default function WalletScreen() {
         );
 
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        trackWalletTopupCompleted(amt);
         setTopupModal(false);
         setAmount('');
         showAlert('Success', `₦${amt.toLocaleString()} added to your wallet`);
@@ -79,6 +84,7 @@ export default function WalletScreen() {
         await refreshTransactions();
       } else {
         // Open Paystack WebView — must close topupModal FIRST to avoid stacked modal bug
+        trackWalletTopupInitiated(amt, 'paystack');
         const result = await initializePayment(user?.email || '', amt, 'wallet_topup');
         const authUrl = result?.data?.authorization_url;
         if (!authUrl) throw new Error('No payment URL received. Please try again.');
@@ -88,6 +94,8 @@ export default function WalletScreen() {
       }
     } catch (e: any) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      trackWalletTopupFailed(e.message || 'Unknown error');
+      captureError(e, { stage: 'wallet_topup' });
       showAlert('Top-up Failed', e.message);
     } finally {
       setLoading(false);

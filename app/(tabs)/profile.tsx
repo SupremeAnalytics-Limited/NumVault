@@ -14,6 +14,7 @@ import { Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 import { FunctionsHttpError } from '@supabase/supabase-js';
+import { trackLogout, trackAccountDeleted, trackSupportInteraction } from '@/services/sentryService';
 
 const ADMIN_EMAIL = 'oluwaferanmionabanjo@gmail.com';
 const supabase = getSupabaseClient();
@@ -77,6 +78,7 @@ export default function ProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          trackLogout();
           const { error } = await logout();
           if (!error) {
             router.replace('/login');
@@ -260,6 +262,7 @@ export default function ProfileScreen() {
               style={[styles.menuRow, styles.supportRow]}
               onPress={async () => {
                 await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                trackSupportInteraction('instagram_dm');
                 Linking.openURL('https://ig.me/m/num.vault');
               }}
               activeOpacity={0.7}
@@ -548,6 +551,7 @@ export default function ProfileScreen() {
                       return;
                     }
                     // Success — sign out locally and redirect
+                    trackAccountDeleted();
                     await logout();
                     setShowDeleteModal(false);
                     router.replace('/onboarding');

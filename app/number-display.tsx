@@ -13,6 +13,10 @@ import { fetchOrder, Order } from '@/services/orderService';
 import { requestNotificationPermissions, sendOTPReceivedNotification } from '@/services/notificationService';
 import { getOTP } from '@/services/sociallyService';
 import { OTP_POLL_INTERVAL, OTP_TIMEOUT } from '@/constants/config';
+import {
+  trackOtpReceived, trackOtpTimeout, trackRefundInitiated, trackRefundCompleted,
+  trackRefundFailed, trackOrderStatusChange, captureError,
+} from '@/services/sentryService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
 const supabase = getSupabaseClient();
@@ -93,6 +97,8 @@ export default function NumberDisplayScreen() {
   // "already past window" guard in loadOrderAndMaybeStartTimer.
   const triggerExpiry = async () => {
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    trackOtpTimeout(order_id);
+    trackRefundInitiated(order_id);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -108,6 +114,7 @@ export default function NumberDisplayScreen() {
       const result = await res.json();
       if (result.refunded && result.refund_amount) {
         setRefundAmount(result.refund_amount);
+        trackRefundCompleted(order_id, result.refund_amount);
       } else if (result.already_handled || result.already_expired) {
         if (result.status === 'completed') {
           const fresh = await fetchOrder(order_id);
@@ -118,10 +125,13 @@ export default function NumberDisplayScreen() {
         }
       } else {
         setRefundError(true);
+        trackRefundFailed(order_id, 'expire-order returned unexpected result');
       }
     } catch (e) {
       console.error('expire-order call failed:', e);
       setRefundError(true);
+      captureError(e, { stage: 'expire_order', order_id });
+      trackRefundFailed(order_id, 'expire-order call threw');
     }
   };
 
@@ -134,6 +144,8 @@ export default function NumberDisplayScreen() {
         if (data.otp || data.status === 'completed') {
           clearInterval(pollRef.current!);
           clearInterval(timerRef.current!);
+          trackOtpReceived(order_id);
+          trackOrderStatusChange(order_id, 'completed');
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           if (data.otp) {
             await sendOTPReceivedNotification(data.project_name || 'Platform', data.otp);
