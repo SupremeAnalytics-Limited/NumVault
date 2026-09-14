@@ -1,4 +1,4 @@
-// build-v3
+// build-v4
 import * as Sentry from '@sentry/react-native';
 import { AlertProvider, AuthProvider } from '@/template';
 import { Stack } from 'expo-router';
@@ -10,10 +10,14 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 // ─── Sentry initialisation ────────────────────────────────────────────────────
-// DSN is read from the public environment variable — never hardcoded.
-// The @sentry/react-native/expo config plugin injects `release` at build time
-// from app.json version + versionCode — do NOT set `release` manually here.
+// DSN is read from the public environment variable set in .env:
+//   EXPO_PUBLIC_SENTRY_DSN=https://...@sentry.io/...
+// Release is set manually because the @sentry/react-native/expo Expo config
+// plugin is NOT used (its postinstall script requires expo to be resolvable
+// at install time, which is incompatible with the OnSpace build environment).
+// Keep release in sync with app.json version + android.versionCode.
 Sentry.init({
+  release: 'ng.numvault.app@1.0.4+15',
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
   environment: __DEV__ ? 'development' : 'production',
   enableTracing: true,

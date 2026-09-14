@@ -9,6 +9,11 @@
  *  - No full phone numbers (purchased temporary numbers are NEVER sent)
  *  - No wallet credentials or API keys
  *  - User is identified by internal ID only (no email sent unless opted in)
+ *
+ * Note: Sentry.metrics (Custom Metrics API) was deprecated and removed by
+ * Sentry in October 2024 (affected SDK ≥6). Counters/distributions are
+ * replaced with structured breadcrumbs + captureMessage events that appear
+ * in Issues and are searchable in Sentry.
  */
 
 import * as Sentry from '@sentry/react-native';
@@ -43,13 +48,12 @@ export function trackSignupOtpSent(success: boolean, errorMessage?: string) {
 export function trackSignupCompleted(userId: string) {
   setSentryUser(userId);
   Sentry.addBreadcrumb({ category: 'auth', message: 'signup_completed', level: 'info' });
-  Sentry.metrics.increment('auth.signup.success', 1);
+  Sentry.captureMessage('auth.signup.success', 'info');
 }
 
 export function trackSignupFailed(reason: string) {
   Sentry.addBreadcrumb({ category: 'auth', message: 'signup_failed', level: 'warning',
     data: { reason } });
-  Sentry.metrics.increment('auth.signup.failure', 1);
 }
 
 export function trackLoginStarted() {
@@ -59,13 +63,11 @@ export function trackLoginStarted() {
 export function trackLoginCompleted(userId: string) {
   setSentryUser(userId);
   Sentry.addBreadcrumb({ category: 'auth', message: 'login_completed', level: 'info' });
-  Sentry.metrics.increment('auth.login.success', 1);
 }
 
 export function trackLoginFailed(reason: string) {
   Sentry.addBreadcrumb({ category: 'auth', message: 'login_failed', level: 'warning',
     data: { reason } });
-  Sentry.metrics.increment('auth.login.failure', 1);
 }
 
 export function trackOnboardingCompleted() {
@@ -105,32 +107,26 @@ export function trackCheckoutOpened(serviceName: string, priceNgn: number, fromW
 export function trackPurchaseInitiated(serviceName: string, priceNgn: number, method: 'wallet' | 'paystack') {
   Sentry.addBreadcrumb({ category: 'checkout', message: 'purchase_initiated', level: 'info',
     data: { service: serviceName, price_ngn: priceNgn, method } });
-  Sentry.metrics.increment('checkout.purchase.initiated', 1);
 }
 
 export function trackPaymentSucceeded(priceNgn: number, method: 'wallet' | 'paystack') {
   Sentry.addBreadcrumb({ category: 'checkout', message: 'payment_succeeded', level: 'info',
     data: { price_ngn: priceNgn, method } });
-  Sentry.metrics.increment('checkout.payment.success', 1);
-  Sentry.metrics.distribution('checkout.payment.amount_ngn', priceNgn);
 }
 
 export function trackPaymentFailed(reason: string, method: 'wallet' | 'paystack') {
   Sentry.addBreadcrumb({ category: 'checkout', message: 'payment_failed', level: 'warning',
     data: { reason, method } });
-  Sentry.metrics.increment('checkout.payment.failure', 1);
 }
 
 export function trackPurchaseSucceeded(serviceName: string, orderId: string) {
   Sentry.addBreadcrumb({ category: 'checkout', message: 'purchase_succeeded', level: 'info',
     data: { service: serviceName, order_id: orderId } });
-  Sentry.metrics.increment('checkout.purchase.success', 1);
 }
 
 export function trackPurchaseFailed(serviceName: string, reason: string) {
   Sentry.addBreadcrumb({ category: 'checkout', message: 'purchase_failed', level: 'warning',
     data: { service: serviceName, reason } });
-  Sentry.metrics.increment('checkout.purchase.failure', 1);
 }
 
 export function trackCheckoutCompleted(serviceName: string, priceNgn: number) {
@@ -143,20 +139,16 @@ export function trackCheckoutCompleted(serviceName: string, priceNgn: number) {
 export function trackWalletTopupInitiated(amountNgn: number, method: 'saved_card' | 'paystack') {
   Sentry.addBreadcrumb({ category: 'wallet', message: 'topup_initiated', level: 'info',
     data: { amount_ngn: amountNgn, method } });
-  Sentry.metrics.increment('wallet.topup.initiated', 1);
 }
 
 export function trackWalletTopupCompleted(amountNgn: number) {
   Sentry.addBreadcrumb({ category: 'wallet', message: 'topup_completed', level: 'info',
     data: { amount_ngn: amountNgn } });
-  Sentry.metrics.increment('wallet.topup.success', 1);
-  Sentry.metrics.distribution('wallet.topup.amount_ngn', amountNgn);
 }
 
 export function trackWalletTopupFailed(reason: string) {
   Sentry.addBreadcrumb({ category: 'wallet', message: 'topup_failed', level: 'warning',
     data: { reason } });
-  Sentry.metrics.increment('wallet.topup.failure', 1);
 }
 
 // ─── Refund events ────────────────────────────────────────────────────────────
@@ -169,13 +161,11 @@ export function trackRefundInitiated(orderId: string) {
 export function trackRefundCompleted(orderId: string, amountNgn: number) {
   Sentry.addBreadcrumb({ category: 'refund', message: 'refund_completed', level: 'info',
     data: { order_id: orderId, amount_ngn: amountNgn } });
-  Sentry.metrics.increment('refund.completed', 1);
 }
 
 export function trackRefundFailed(orderId: string, reason?: string) {
   Sentry.addBreadcrumb({ category: 'refund', message: 'refund_failed', level: 'error',
     data: { order_id: orderId, reason } });
-  Sentry.metrics.increment('refund.failed', 1);
 }
 
 // ─── Order status events ──────────────────────────────────────────────────────
@@ -188,13 +178,11 @@ export function trackOrderStatusChange(orderId: string, newStatus: string) {
 export function trackOtpReceived(orderId: string) {
   Sentry.addBreadcrumb({ category: 'order', message: 'otp_received', level: 'info',
     data: { order_id: orderId } });
-  Sentry.metrics.increment('order.otp.received', 1);
 }
 
 export function trackOtpTimeout(orderId: string) {
   Sentry.addBreadcrumb({ category: 'order', message: 'otp_timeout', level: 'warning',
     data: { order_id: orderId } });
-  Sentry.metrics.increment('order.otp.timeout', 1);
 }
 
 // ─── Support interaction ──────────────────────────────────────────────────────
