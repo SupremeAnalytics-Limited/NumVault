@@ -111,7 +111,6 @@ export default function HomeScreen() {
     else setLoadingServices(true);
     try {
       const items = await getServiceList('server-b');
-      // Sort: well-known services first within each category
       const sorted = [...items].sort((a, b) => {
         const ra = getServicePopularityRank(a.title);
         const rb = getServicePopularityRank(b.title);
@@ -127,7 +126,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Build sections for SectionList (Server B)
   const serverBSections: ServiceSection[] = React.useMemo(() => {
     const filtered = allServices.filter((s) => {
       const q = searchQuery.toLowerCase();
@@ -165,7 +163,6 @@ export default function HomeScreen() {
         ...c,
         region: detectCountryRegion(c.title),
       }));
-      // Sort: Popular first, then alphabetical within regions
       enriched.sort((a, b) => {
         const popOrder: CountryRegion[] = ['Popular', 'Africa', 'Americas', 'Europe', 'Asia', 'Middle East', 'Other'];
         const ra = popOrder.indexOf(a.region);
@@ -189,7 +186,6 @@ export default function HomeScreen() {
     setLoadingPackages(true);
     try {
       const pkgs = await getPackagesForCountry('server-a', country.country_code);
-      // Sort packages: well-known platforms first
       const sorted = [...pkgs].sort((a, b) => {
         const ra = getServicePopularityRank(a.project_name);
         const rb = getServicePopularityRank(b.project_name);
@@ -205,7 +201,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Build sections for Server A country list
   const serverASections: CountrySection[] = React.useMemo(() => {
     const q = countrySearch.toLowerCase();
     const filtered = allCountries.filter((c) =>
@@ -384,31 +379,34 @@ export default function HomeScreen() {
             </View>
           ) : (
             <>
-              {/* Category chips */}
-              <ScrollView
-                horizontal showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipRow}
-              >
-                {SERVICE_CATEGORIES.filter((c) => catCounts[c] > 0 || c === 'All').map((cat) => {
-                  const active = activeCat === cat;
-                  return (
-                    <TouchableOpacity
-                      key={cat}
-                      style={[styles.chip, active && styles.chipActive]}
-                      onPress={async () => { await Haptics.selectionAsync(); setActiveCat(cat); }}
-                      activeOpacity={0.8}
-                    >
-                      <MaterialIcons name={CATEGORY_ICONS[cat] as any} size={13} color={active ? Colors.black : Colors.textSecondary} />
-                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{cat}</Text>
-                      <View style={[styles.chipBadge, active && styles.chipBadgeActive]}>
-                        <Text style={[styles.chipBadgeText, active && styles.chipBadgeTextActive]}>
-                          {catCounts[cat]}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
+              {/* Category chips — outer View allocates vertical space so pills are never clipped */}
+              <View style={styles.chipWrap}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.chipRow}
+                >
+                  {SERVICE_CATEGORIES.filter((c) => catCounts[c] > 0 || c === 'All').map((cat) => {
+                    const active = activeCat === cat;
+                    return (
+                      <TouchableOpacity
+                        key={cat}
+                        style={[styles.chip, active && styles.chipActive]}
+                        onPress={async () => { await Haptics.selectionAsync(); setActiveCat(cat); }}
+                        activeOpacity={0.8}
+                      >
+                        <MaterialIcons name={CATEGORY_ICONS[cat] as any} size={13} color={active ? Colors.black : Colors.textSecondary} />
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{cat}</Text>
+                        <View style={[styles.chipBadge, active && styles.chipBadgeActive]}>
+                          <Text style={[styles.chipBadgeText, active && styles.chipBadgeTextActive]}>
+                            {catCounts[cat]}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
 
               {serverBSections.every((s) => s.data.length === 0) || serverBSections.length === 0 ? (
                 <View style={styles.emptyCenter}>
@@ -445,7 +443,6 @@ export default function HomeScreen() {
                     </View>
                   )}
                   renderItem={({ item, index, section }) => {
-                    // Render two cards per row via pairing
                     if (index % 2 !== 0) return null;
                     const next = section.data[index + 1];
                     return (
@@ -678,7 +675,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: 10,
   },
   providerTabActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryMuted },
-
   providerTabLabel: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
   providerTabLabelActive: { color: Colors.primary },
   providerTabDesc: { color: Colors.textMuted, fontSize: 10, marginTop: 1 },
@@ -700,10 +696,16 @@ const styles = StyleSheet.create({
   loadingTitle: { color: Colors.text, fontSize: FontSize.lg, fontWeight: FontWeight.bold },
   loadingSubtitle: { color: Colors.textSecondary, fontSize: FontSize.sm, textAlign: 'center' },
 
-  // Chip bar
+  // Chip bar — outer View owns the vertical space; ScrollView just scrolls horizontally
+  chipWrap: {
+    paddingTop: 6,
+    paddingBottom: Spacing.md,
+  },
   chipRow: {
-    paddingHorizontal: Spacing.lg, paddingTop: 4, paddingBottom: Spacing.md, gap: Spacing.sm,
-    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
