@@ -17,42 +17,29 @@
 | `beforeSend` sensitive-key stripping | ✅ Done |
 | `beforeBreadcrumb` sensitive-log filter | ✅ Done |
 | `sentry.properties` (org/project for CLI uploads) | ✅ Done |
-| **`EXPO_PUBLIC_SENTRY_DSN` in `.env`** | ❌ **You must add this** |
-| Source-map uploads | ⚠️ Manual CLI step after each production build |
-| Native symbol uploads (Android ProGuard / iOS dSYM) | ⚠️ Manual CLI step after each production build |
+| **`EXPO_PUBLIC_SENTRY_DSN` in `.env`** | ✅ Configured in OnSpace secrets |
+| `@sentry/react-native/expo` plugin in `app.json` | ✅ Done (org + project + `enableMetroModuleIdFactory: false`) |
+| Source-map uploads | ⚠️ Set `SENTRY_AUTH_TOKEN` build secret |
+| Native symbol uploads (Android ProGuard / iOS dSYM) | ⚠️ Set `SENTRY_AUTH_TOKEN` build secret |
 
 ---
 
-## Why the Sentry Wizard Cannot Be Used
+## Expo Config Plugin
 
-The `@sentry/wizard` runs a postinstall script that calls `@expo/config` to detect the Expo SDK version. In the OnSpace cloud build environment `expo` is not resolvable during `npm install`, so the wizard's dependency-install step fails with:
+The `@sentry/react-native/expo` Expo config plugin is included in `app.json` with:
+- `organization: supremeanalytics`
+- `project: numvault`
+- `enableMetroModuleIdFactory: false` — disables the legacy Metro internal API usage that caused the `Cannot find module 'metro/src/lib/createModuleIdFactory'` build failure
 
-```
-ConfigError: Cannot determine the project's Expo SDK version because the module `expo` is not installed.
-```
-
-The wizard's only meaningful outputs beyond what is already implemented are:
-- `sentry.properties` (already created manually)
-- `EXPO_PUBLIC_SENTRY_DSN` embedded in config (must be provided manually — see below)
-- The `@sentry/react-native/expo` Expo config plugin in `app.json` (cannot be added — same postinstall issue)
-
-The current implementation is the **official Sentry manual-setup** equivalent and is fully functional once the DSN is supplied.
+Without `enableMetroModuleIdFactory: false`, the plugin's auto-discovered Metro serializer attempts to import the removed `metro/src/lib/createModuleIdFactory` internal path (removed in Metro 0.80+), which crashes `createBundleReleaseJsAndAssets` before any JS is produced.
 
 ---
 
-## Step 1: Add Your DSN (Required)
+## Step 1: DSN
 
-1. Open https://sentry.io/settings/supremeanalytics/projects/numvault/keys/
-2. Copy the DSN (format: `https://XXXXXX@oXXXXXX.ingest.sentry.io/XXXXXXX`)
-3. Add it to `.env` in the project root:
+`EXPO_PUBLIC_SENTRY_DSN` is configured in OnSpace Cloud Secrets and automatically injected into the build. No manual `.env` change required.
 
-```
-EXPO_PUBLIC_SENTRY_DSN=https://YOUR_KEY@oXXXXXX.ingest.sentry.io/XXXXXXX
-```
-
-The DSN is a **public** key — it is safe to commit to your repository.
-
-Once added, Sentry will receive events on next app launch.
+To find your DSN: https://sentry.io/settings/supremeanalytics/projects/numvault/keys/
 
 ---
 
@@ -93,17 +80,18 @@ Example for 1.0.5 / versionCode 16: `ng.numvault.app@1.0.5+16`
 Without source-map upload, production JS errors show minified stack traces. Upload after each production build:
 
 ### Prerequisites
+
+The `@sentry/react-native/expo` plugin automatically uploads source maps during EAS builds **if** `SENTRY_AUTH_TOKEN` is set as a build secret.
+
+1. Get a token at: https://sentry.io/settings/account/api/auth-tokens/  
+   Required scopes: `project:releases`, `org:read`
+2. Add it to OnSpace Cloud Secrets as `SENTRY_AUTH_TOKEN` (**never commit this token**)
+
+For manual CLI uploads:  
 ```bash
 npm install --save-dev @sentry/cli
-```
-
-Set `SENTRY_AUTH_TOKEN` in your terminal (**never commit this**):
-```bash
 export SENTRY_AUTH_TOKEN=your_token_here
 ```
-
-Get a token at: https://sentry.io/settings/account/api/auth-tokens/
-Required scopes: `project:releases`, `org:read`
 
 ### Upload JavaScript source maps
 ```bash
@@ -204,10 +192,10 @@ All events use `Sentry.addBreadcrumb()`. They appear in breadcrumb trails in Sen
 
 All existing build fixes are preserved:
 - `assetBundlePatterns` explicit list intact — no `**/*` wildcard
-- `removeStaleOnboardingAssets` Gradle plugin intact
-- `metro.config.js` is the clean Expo default
+- `removeStaleOnboardingAssets` Gradle plugin is first in `plugins[]` — runs before Sentry plugin
+- `metro.config.js` is the clean Expo default (Sentry Metro serializer is disabled via `enableMetroModuleIdFactory: false`)
 - `babel.config.js` preserves `nv-build-9` cache-bust comment
-- The `@sentry/react-native/expo` Expo config plugin is **not** in `app.json` — no Gradle tasks injected by Sentry
+- `enableMetroModuleIdFactory: false` prevents Sentry from injecting the legacy Metro internal that broke `createBundleReleaseJsAndAssets`
 
 ---
 
