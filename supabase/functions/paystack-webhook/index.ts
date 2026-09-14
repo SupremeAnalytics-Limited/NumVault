@@ -110,20 +110,13 @@ Deno.serve(async (req: Request) => {
         if (!providerCode || !countryCode || !projectCode) {
           console.warn('number_purchase webhook missing purchase metadata — cannot complete server-side', metadata);
         } else {
-          // ── Idempotency check: has this Paystack reference already produced an order? ──
-          const { data: existingOrder } = await supabaseAdmin
-            .from('orders')
-            .select('id, status')
-            .eq('paystack_reference', reference)
-            .maybeSingle();
+          // Idempotency is enforced atomically inside purchase-number via the
+          // purchase_locks table (unique INSERT on paystack_reference). No need
+          // for a SELECT-then-act check here — it was itself a race condition.
+          // Always call purchase-number; it will reject any duplicate atomically.
+          console.log(`Webhook: triggering server-side number purchase for ${reference}`);
 
-          if (existingOrder) {
-            console.log(`Webhook: order already exists for reference ${reference} (id: ${existingOrder.id}, status: ${existingOrder.status}) — skipping duplicate purchase`);
-          } else {
-            // No order yet — client missed the callback. Complete the purchase now.
-            console.log(`Webhook: no order found for ${reference} — triggering server-side number purchase`);
-
-            try {
+          try {
               const purchaseRes = await fetch(`${supabaseUrl}/functions/v1/purchase-number`, {
                 method: 'POST',
                 headers: {
@@ -151,13 +144,15 @@ Deno.serve(async (req: Request) => {
               const purchaseData = await purchaseRes.json();
               if (purchaseRes.ok && purchaseData?.data?.order) {
                 console.log(`Webhook purchase SUCCESS for ${reference}: order ${purchaseData.data.order.id}`);
+              } else if (purchaseRes.status === 409 || purchaseData?.data?.idempotent) {
+                // 409 = lock already held by client call; idempotent = order existed
+                console.log(`Webhook purchase: reference ${reference} already handled by client call — no action needed`);
               } else {
                 console.error(`Webhook purchase FAILED for ${reference}:`, JSON.stringify(purchaseData));
               }
             } catch (purchaseErr) {
               console.error(`Webhook purchase EXCEPTION for ${reference}:`, purchaseErr);
             }
-          }
         }
       }
       // ── End number purchase safety net ─────────────────────────────────────

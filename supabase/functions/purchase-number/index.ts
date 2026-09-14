@@ -67,22 +67,51 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ── Idempotency guard ────────────────────────────────────────────────────
+    // ── ATOMIC IDEMPOTENCY RESERVATION ──────────────────────────────────────
+    // For Paystack-backed purchases, attempt to INSERT a lock row BEFORE doing
+    // anything else. The PRIMARY KEY on paystack_reference means only one
+    // concurrent caller can succeed. The loser gets a unique-violation and
+    // returns the existing order, closing the race window entirely.
     if (paystack_reference && !use_wallet) {
-      const { data: existingOrder } = await supabaseAdmin
-        .from('orders')
-        .select('*')
-        .eq('paystack_reference', paystack_reference)
-        .maybeSingle();
+      const { error: lockError } = await supabaseAdmin
+        .from('purchase_locks')
+        .insert({ paystack_reference, user_id: user.id });
 
-      if (existingOrder) {
-        console.log(`Idempotency: order ${existingOrder.id} already exists for Paystack ref ${paystack_reference} — returning existing`);
-        return new Response(JSON.stringify({ data: { order: existingOrder, idempotent: true } }), {
+      if (lockError) {
+        // unique_violation (23505) = another call already claimed this reference
+        if (lockError.code === '23505') {
+          // Wait briefly for the winning call to commit, then return its order
+          await new Promise((r) => setTimeout(r, 1500));
+          const { data: existingOrder } = await supabaseAdmin
+            .from('orders')
+            .select('*')
+            .eq('paystack_reference', paystack_reference)
+            .maybeSingle();
+
+          if (existingOrder) {
+            console.log(`Idempotency lock: order ${existingOrder.id} already exists for ${paystack_reference} — returning existing`);
+            return new Response(JSON.stringify({ data: { order: existingOrder, idempotent: true } }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          // Winning call may still be in-flight; return 409 so client can retry
+          console.log(`Idempotency lock: duplicate call for ${paystack_reference} while winning call is still processing`);
+          return new Response(JSON.stringify({ error: 'Purchase already in progress for this reference. Please wait and retry.' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 409,
+          });
+        }
+        // Any other DB error — bail out
+        console.error('purchase_locks insert error:', lockError);
+        return new Response(JSON.stringify({ error: 'Failed to reserve purchase lock. Please try again.' }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500,
         });
       }
+
+      console.log(`Idempotency lock acquired for ${paystack_reference}`);
     }
-    // ────────────────────────────────────────────────────────────────────────
+    // ── END ATOMIC RESERVATION ───────────────────────────────────────────────
 
     let paidAmount: number;
 
@@ -155,6 +184,12 @@ Deno.serve(async (req: Request) => {
         console.log('Paystack verify response:', JSON.stringify(verifyData));
 
         if (!verifyData.status || verifyData.data?.status !== 'success') {
+          // Release the lock — payment not confirmed means we shouldn't block retries
+          await supabaseAdmin
+            .from('purchase_locks')
+            .delete()
+            .eq('paystack_reference', paystack_reference);
+
           return new Response(JSON.stringify({ error: 'Payment not confirmed. Please try again.' }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 402,
@@ -205,6 +240,8 @@ Deno.serve(async (req: Request) => {
         'Failed to purchase number from provider';
 
       // ── REFUND/ROLLBACK ──────────────────────────────────────────────────────
+      // Safe to refund here: the lock insert succeeded above, meaning this is
+      // guaranteed to be the ONLY caller that reaches this point for this reference.
       console.log(`Socially purchase failed. Refunding ₦${paidAmount} to user ${user.id}`);
       try {
         const { data: profileNow } = await supabaseAdmin
