@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { fetchProfile } from '@/services/orderService';
 import { getSupabaseClient } from '@/template';
 
@@ -43,6 +43,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, []);
+
+  // Load wallet balance as soon as a session exists, without waiting for
+  // the user to navigate to the Wallet or Profile tab.
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (active && data.session) refreshProfile();
+    });
+    return () => { active = false; };
+  }, [refreshProfile]);
 
   const walletBalance = profile?.wallet_balance ?? 0;
   const hasCard = !!(profile?.card_auth_code && profile?.card_last4);
