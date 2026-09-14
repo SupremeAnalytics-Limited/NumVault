@@ -17,7 +17,7 @@ import * as Notifications from 'expo-notifications';
 //
 // Release format: {android.package}@{version}+{versionCode}
 // Update this string whenever version/versionCode changes in app.json.
-const SENTRY_RELEASE = 'ng.numvault.app@1.0.4+19';
+const SENTRY_RELEASE = 'ng.numvault.app@1.0.4+20';
 
 // navigationIntegration is the correct integration that exposes
 // registerNavigationContainer — reactNativeTracingIntegration() is for
