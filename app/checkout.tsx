@@ -271,7 +271,10 @@ export default function CheckoutScreen() {
             <MaterialIcons name="lock" size={12} color={Colors.textMuted} />
             <Text style={styles.secureText}>Secured by Paystack · 256-bit TLS encryption</Text>
           </View>
-          <Text style={styles.chargesNote}>Paystack transaction charges apply.</Text>
+          <View style={styles.chargesNoteRow}>
+            <MaterialIcons name="info" size={13} color={Colors.primary} />
+            <Text style={styles.chargesNote}>Paystack transaction charges apply.</Text>
+          </View>
         </View>
         )}
 
@@ -455,7 +458,19 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.surfaceBorder,
   },
   secureText: { color: Colors.textMuted, fontSize: 11 },
-  chargesNote: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
+  chargesNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: Colors.primaryMuted,
+    borderWidth: 1,
+    borderColor: 'rgba(0,200,83,0.3)',
+    borderRadius: Radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginTop: 2,
+  },
+  chargesNote: { color: Colors.primary, fontSize: 12, fontWeight: FontWeight.semibold },
 
   // Wallet banner
   walletBanner: {
