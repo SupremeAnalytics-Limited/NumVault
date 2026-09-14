@@ -1,4 +1,4 @@
-// build-v6
+// build-v7
 import * as Sentry from '@sentry/react-native';
 import { AlertProvider, AuthProvider } from '@/template';
 import { Stack, useNavigationContainerRef } from 'expo-router';

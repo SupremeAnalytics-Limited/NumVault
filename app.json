@@ -35,6 +35,7 @@
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
+      "./plugins/fixKotlinVersion",
       "./plugins/disableSentryAutoUpload",
       "./plugins/fixMetroModuleIdFactory",
       "./plugins/removeStaleOnboardingAssets",
