@@ -12,7 +12,7 @@ import { useAlert, getSupabaseClient } from '@/template';
 import { WalletContext } from '@/contexts/WalletContext';
 import { OrderContext } from '@/contexts/OrderContext';
 import { fetchOrder, Order } from '@/services/orderService';
-import { requestNotificationPermissions, sendOTPReceivedNotification } from '@/services/notificationService';
+import { requestNotificationPermissions, sendOTPReceivedNotification, sendRefundNotification } from '@/services/notificationService';
 import { getOTP } from '@/services/sociallyService';
 import { OTP_POLL_INTERVAL, OTP_TIMEOUT } from '@/constants/config';
 import {
@@ -146,6 +146,12 @@ export default function NumberDisplayScreen() {
         );
         orderCtx?.refreshTransactions().catch((e) =>
           console.warn('number-display: tx refresh after refund failed', e)
+        );
+        // Local device notification — immediate, no EAS/Firebase/push server needed.
+        // Deduplication inside sendRefundNotification prevents a duplicate if
+        // OrderContext's watcher already handled this same order.
+        sendRefundNotification(order_id, result.refund_amount).catch((e) =>
+          console.warn('number-display: refund notification failed', e)
         );
       } else if (result.already_handled || result.already_expired) {
         if (result.status === 'completed') {

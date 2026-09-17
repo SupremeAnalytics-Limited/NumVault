@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/template';
 import { fetchOrders, fetchTransactions, fetchOrderStatus, Order, Transaction } from '@/services/orderService';
 import { OTP_TIMEOUT } from '@/constants/config';
 import { WalletContext } from '@/contexts/WalletContext';
+import { sendRefundNotification } from '@/services/notificationService';
 
 const supabase = getSupabaseClient();
 
@@ -118,6 +119,16 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           refreshTransactions().catch((e) =>
             console.warn('OrderContext: tx refresh after refund failed', e)
           );
+
+          // Fire a local device notification only on a fresh refund (not
+          // already_handled) so the user is notified even while the app is
+          // backgrounded or on a different screen. Deduplication is enforced
+          // inside sendRefundNotification via a module-level Set.
+          if (result.refunded && result.refund_amount) {
+            sendRefundNotification(order.id, result.refund_amount).catch((e) =>
+              console.warn('OrderContext: refund notification failed', e)
+            );
+          }
         }
       } catch (e) {
         console.warn(`OrderContext: expire-order failed for ${order.id}`, e);

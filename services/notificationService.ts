@@ -136,6 +136,52 @@ export async function sendOTPReceivedNotification(platform: string, otp: string)
   });
 }
 
+// Module-level deduplication guard: tracks order IDs for which a refund
+// notification has already been scheduled in this app session. Both
+// OrderContext and number-display share this module singleton, so even if
+// both paths confirm the same refund concurrently, only one notification fires.
+const refundNotifiedOrders = new Set<string>();
+
+/**
+ * Schedule an immediate local device notification when an order is refunded.
+ * Local-only — no remote push, no Firebase, no OneSignal, no EAS projectId.
+ * Safe to call from any context; deduplication is enforced by refundNotifiedOrders.
+ */
+export async function sendRefundNotification(orderId: string, amount: number): Promise<void> {
+  if (Platform.OS === 'web') return;
+
+  // Deduplicate: never send more than one refund notification per order per session
+  if (refundNotifiedOrders.has(orderId)) {
+    console.log(`sendRefundNotification: already notified for order ${orderId}, skipping`);
+    return;
+  }
+  refundNotifiedOrders.add(orderId);
+
+  const hasPermission = await requestNotificationPermissions();
+  if (!hasPermission) {
+    console.log('sendRefundNotification: notification permission not granted, skipping');
+    return;
+  }
+
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '💰 Refund Processed',
+        body: `Your NumVault order has expired and ₦${Number(amount).toLocaleString()} has been refunded to your wallet.`,
+        data: { type: 'expire_refund', order_id: orderId, amount },
+        sound: true,
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+      },
+      trigger: null, // Immediate local notification — no server required
+    });
+    console.log(`sendRefundNotification: scheduled for order ${orderId}, amount ₦${amount}`);
+  } catch (e) {
+    // Remove from dedup set so a retry is possible if scheduling failed
+    refundNotifiedOrders.delete(orderId);
+    console.error('sendRefundNotification: failed to schedule notification:', e instanceof Error ? e.message : String(e));
+  }
+}
+
 export async function sendLowBalanceNotification(balance: number) {
   await Notifications.scheduleNotificationAsync({
     content: {
