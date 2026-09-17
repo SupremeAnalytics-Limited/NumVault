@@ -118,6 +118,7 @@ export default function OnboardingScreen() {
 
       {/* Bottom content */}
       <View style={[styles.bottomCard, { paddingBottom: insets.bottom + 24 }]}>
+        <Text style={styles.screenLabel}>{screen.label}</Text>
         <Text style={styles.headline}>{screen.headline}</Text>
 
         {screen.subtext ? (
@@ -214,6 +215,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     paddingHorizontal: 28,
     paddingTop: 8,
+  },
+  screenLabel: {
+    color: Colors.primary,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: Spacing.sm,
   },
   headline: {
     color: Colors.text,
