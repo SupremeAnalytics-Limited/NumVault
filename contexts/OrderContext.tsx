@@ -85,10 +85,20 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           },
           body: JSON.stringify({ order_id: order.id }),
         });
+
+        // Guard: treat non-2xx as a retriable failure, not a silent success
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '(unreadable body)');
+          console.warn(`OrderContext: expire-order HTTP ${res.status} for ${order.id}:`, errText);
+          expiryInFlight.delete(order.id); // allow retry next cycle
+          continue;
+        }
+
         const result = await res.json();
 
-        if (result.refunded || result.already_expired || result.already_handled) {
-          // Merge the final status back into local state immediately
+        // Treat both a fresh refund and an already-handled response as terminal —
+        // flip the local order status so the UI reflects reality immediately.
+        if (result.refunded || result.already_handled) {
           const finalStatus = result.status ?? 'expired';
           setOrders((prev) =>
             prev.map((o) =>
@@ -96,18 +106,18 @@ export function OrderProvider({ children }: { children: ReactNode }) {
             )
           );
 
-          // After a successful refund, sync wallet balance and transaction history
-          // from the DB so Available Balance updates without user interaction.
-          // refreshProfile fetches user_profiles.wallet_balance (the authoritative value);
-          // refreshTransactions fetches the new +refund credit row.
-          if (result.refunded) {
-            walletCtx?.refreshProfile().catch((e) =>
-              console.warn('OrderContext: wallet refresh after refund failed', e)
-            );
-            refreshTransactions().catch((e) =>
-              console.warn('OrderContext: tx refresh after refund failed', e)
-            );
-          }
+          // After a confirmed refund, re-fetch the authoritative wallet_balance
+          // and transaction list from the DB so the Wallet UI updates immediately
+          // without the user pressing Refresh.
+          // NOTE: always refresh on result.refunded; also refresh on already_handled
+          // because the previous caller may have credited the wallet and we need
+          // the client to catch up if it missed the earlier update.
+          walletCtx?.refreshProfile().catch((e) =>
+            console.warn('OrderContext: wallet refresh after refund failed', e)
+          );
+          refreshTransactions().catch((e) =>
+            console.warn('OrderContext: tx refresh after refund failed', e)
+          );
         }
       } catch (e) {
         console.warn(`OrderContext: expire-order failed for ${order.id}`, e);
@@ -115,12 +125,21 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         expiryInFlight.delete(order.id);
       }
     }
-  }, []);
+  }, [walletCtx, refreshTransactions]);
 
   // Keep a stable ref to the latest orders so the interval closure always
   // has access to current state without being recreated on every render.
   const ordersRef = useRef<Order[]>([]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
+
+  // On mount: ensure we have a populated order list before the first expiry
+  // check runs. Without this, ordersRef.current starts as [] and any pending
+  // orders created before this session are invisible to the watcher.
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) refreshOrders();
+    });
+  }, []);
 
   useEffect(() => {
     // Run immediately on mount, then every 30 s

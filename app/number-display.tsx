@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useContext } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, StatusBar,
   ScrollView, ActivityIndicator, Linking, AppState, AppStateStatus,
@@ -9,6 +9,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useAlert, getSupabaseClient } from '@/template';
+import { WalletContext } from '@/contexts/WalletContext';
+import { OrderContext } from '@/contexts/OrderContext';
 import { fetchOrder, Order } from '@/services/orderService';
 import { requestNotificationPermissions, sendOTPReceivedNotification } from '@/services/notificationService';
 import { getOTP } from '@/services/sociallyService';
@@ -38,6 +40,11 @@ export default function NumberDisplayScreen() {
   const [refundAmount, setRefundAmount] = useState<number | null>(null);
   const [refundError, setRefundError] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+
+  // Access wallet + transaction refresh so a client-triggered refund updates
+  // Available Balance immediately without requiring a manual Refresh press.
+  const walletCtx = useContext(WalletContext);
+  const orderCtx  = useContext(OrderContext);
 
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -132,6 +139,14 @@ export default function NumberDisplayScreen() {
       if (result.refunded && result.refund_amount) {
         setRefundAmount(result.refund_amount);
         trackRefundCompleted(order_id, result.refund_amount);
+        // Re-fetch the authoritative wallet_balance and transaction list so the
+        // Wallet screen reflects the refund immediately without a manual refresh.
+        walletCtx?.refreshProfile().catch((e) =>
+          console.warn('number-display: wallet refresh after refund failed', e)
+        );
+        orderCtx?.refreshTransactions().catch((e) =>
+          console.warn('number-display: tx refresh after refund failed', e)
+        );
       } else if (result.already_handled || result.already_expired) {
         if (result.status === 'completed') {
           const fresh = await fetchOrder(order_id);
