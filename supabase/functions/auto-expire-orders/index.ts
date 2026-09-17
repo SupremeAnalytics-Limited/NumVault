@@ -3,15 +3,20 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
 
 // auto-expire-orders — server-side scheduled expiry scanner
 //
-// Scans for pending orders older than OTP_TIMEOUT_MINUTES, atomically flips them to
-// 'expired', and credits each user's wallet with the amount paid.
+// Scans for pending orders older than OTP_TIMEOUT_MINUTES, then calls the
+// `process_order_expiry` database function for each one. That function wraps
+// status flip + atomic wallet increment + transaction record in a single
+// PostgreSQL transaction — if any step fails the whole thing rolls back and
+// the order remains pending so the next cron run can retry cleanly.
 //
-// Invoke via:
-//   - Supabase scheduled cron (recommended): every 2 minutes
-//   - Manual HTTP call with service-role key for testing
+// Push notifications are sent AFTER each successful DB commit so a notification
+// failure never causes a committed refund to appear missing.
 //
-// Idempotent: uses optimistic locking (.eq('status','pending')) so concurrent runs
-// never double-credit. Each order is processed at most once.
+// Idempotent: the RPC uses FOR UPDATE + status check, so concurrent cron runs
+// and client-triggered expire-order calls are safe — only one commits.
+//
+// Invoke via Supabase scheduled cron every 2 minutes, or manually with the
+// service-role key for testing.
 
 const OTP_TIMEOUT_MINUTES = 5; // must match OTP_TIMEOUT in constants/config.ts (300_000 ms)
 
@@ -20,8 +25,6 @@ Deno.serve(async (req: Request) => {
   if (corsRes) return corsRes;
 
   try {
-    // Accept both service-role (cron) and anon (manual test) callers.
-    // For cron invocations the scheduler sends the service-role key directly.
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
@@ -30,10 +33,12 @@ Deno.serve(async (req: Request) => {
     const cutoff = new Date(Date.now() - OTP_TIMEOUT_MINUTES * 60 * 1000).toISOString();
     console.log(`auto-expire-orders: scanning pending orders created before ${cutoff}`);
 
-    // Fetch all pending orders older than the timeout window
+    // Fetch all pending orders older than the timeout window.
+    // We only need enough fields here to identify and notify; the RPC fetches
+    // what it needs inside its own transaction.
     const { data: staleOrders, error: fetchErr } = await supabaseAdmin
       .from('orders')
-      .select('id, user_id, amount_paid, project_name, order_reference, created_at')
+      .select('id, user_id, amount_paid, project_name')
       .eq('status', 'pending')
       .lt('created_at', cutoff);
 
@@ -58,98 +63,57 @@ Deno.serve(async (req: Request) => {
     const skipped: string[] = [];
 
     for (const order of staleOrders) {
-      const orderId: string = order.id;
-      const userId: string = order.user_id;
-      const paidAmount = Number(order.amount_paid);
+      const orderId: string   = order.id;
+      const userId: string    = order.user_id;
+      const projectName: string = order.project_name ?? 'Purchase';
 
-      // Optimistic lock: only UPDATE if still pending (race-safe)
-      const { data: flipped, error: flipErr } = await supabaseAdmin
-        .from('orders')
-        .update({ status: 'expired' })
-        .eq('id', orderId)
-        .eq('status', 'pending') // guard
-        .select('id');
+      // ── Atomic expiry: one DB transaction does expire + credit + tx record ──
+      const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc(
+        'process_order_expiry',
+        { p_order_id: orderId }
+      );
 
-      if (flipErr) {
-        console.error(`auto-expire-orders: failed to flip order ${orderId}`, flipErr);
+      if (rpcErr) {
+        console.error(`auto-expire-orders: RPC failed for order ${orderId}`, rpcErr);
         skipped.push(orderId);
         continue;
       }
 
-      if (!flipped || flipped.length === 0) {
-        // Status changed between fetch and update (OTP arrived or already expired)
-        console.log(`auto-expire-orders: order ${orderId} status changed before update, skipping`);
+      if (!rpcResult.success) {
+        // Already handled (by expire-order or a concurrent cron run) — not an error
+        console.log(`auto-expire-orders: order ${orderId} already handled (${rpcResult.reason}), skipping`);
         skipped.push(orderId);
         continue;
       }
 
-      // Credit wallet
-      const { data: profile, error: profileErr } = await supabaseAdmin
-        .from('user_profiles')
-        .select('wallet_balance')
-        .eq('id', userId)
-        .single();
+      const refundAmount = Number(rpcResult.refund_amount);
+      console.log(`auto-expire-orders: refunded ₦${refundAmount} to user ${userId} for order ${orderId}`);
 
-      if (profileErr || !profile) {
-        console.error(`auto-expire-orders: could not read wallet for user ${userId}`, profileErr);
-        // Order already expired; log for manual resolution
-        skipped.push(orderId);
-        continue;
-      }
-
-      const newBalance = Number(profile.wallet_balance) + paidAmount;
-
-      const { error: creditErr } = await supabaseAdmin
-        .from('user_profiles')
-        .update({ wallet_balance: newBalance })
-        .eq('id', userId);
-
-      if (creditErr) {
-        console.error(`auto-expire-orders: wallet credit failed for user ${userId}`, creditErr);
-        skipped.push(orderId);
-        continue;
-      }
-
-      // Insert refund transaction record
-      const refundRef = order.order_reference
-        ? `timeout_${order.order_reference}`
-        : `timeout_auto_${orderId.slice(0, 8)}_${Date.now()}`;
-
-      await supabaseAdmin.from('transactions').insert({
-        user_id: userId,
-        amount: paidAmount,
-        type: 'credit',
-        reference: refundRef,
-        description: `Auto-refund: ${order.project_name || 'Purchase'} OTP not received within ${OTP_TIMEOUT_MINUTES} minutes`,
-      });
-
-      console.log(`auto-expire-orders: refunded ₦${paidAmount} to user ${userId} for order ${orderId}`);
-
-      // Send push notification to user if they have a registered push token
+      // ── DB committed — now send push notification (non-fatal if it fails) ──
       try {
-        const { data: profileForPush } = await supabaseAdmin
+        const { data: profile } = await supabaseAdmin
           .from('user_profiles')
           .select('push_token')
           .eq('id', userId)
           .single();
 
-        if (profileForPush?.push_token) {
+        if (profile?.push_token) {
           await fetch('https://exp.host/--/api/v2/push/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              to: profileForPush.push_token,
+              to: profile.push_token,
               title: '💰 Refund Processed',
-              body: `No OTP was received for ${order.project_name || 'your purchase'}. ₦${paidAmount.toLocaleString()} has been refunded to your wallet.`,
-              data: { type: 'auto_refund', order_id: orderId, amount: paidAmount },
+              body: `No OTP was received for ${projectName}. ₦${refundAmount.toLocaleString()} has been refunded to your wallet.`,
+              data: { type: 'auto_refund', order_id: orderId, amount: refundAmount },
               sound: 'default',
               priority: 'high',
             }),
           });
-          console.log(`auto-expire-orders: push notification sent to user ${userId}`);
+          console.log(`auto-expire-orders: push sent to user ${userId}`);
         }
       } catch (pushErr) {
-        // Non-fatal — refund already succeeded; just log the push failure
+        // Non-fatal — refund is already committed
         console.warn(`auto-expire-orders: push notification failed for user ${userId}:`, pushErr);
       }
 

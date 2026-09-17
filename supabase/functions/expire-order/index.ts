@@ -1,6 +1,17 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
 
+// expire-order — client-triggered order expiry
+//
+// Called by the app (OrderContext watcher or number-display fallback) when a
+// pending order exceeds OTP_TIMEOUT. Delegates the actual expire → credit →
+// transaction-record work to the `process_order_expiry` database function,
+// which runs all three writes inside one PostgreSQL transaction so a partial
+// failure can never leave the wallet short-changed or the order stuck.
+//
+// Push notification is sent AFTER the DB commit so a notification failure can
+// never cause the refund to be rolled back.
+
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req);
   if (corsRes) return corsRes;
@@ -37,10 +48,11 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Fetch the order — must belong to this user and still be pending
+    // Ownership check: fetch order before delegating to RPC so we can
+    // reject cross-user expiry attempts at the edge layer.
     const { data: order, error: orderErr } = await supabaseAdmin
       .from('orders')
-      .select('id, user_id, amount_paid, status, project_name, order_reference')
+      .select('id, user_id, status, amount_paid, project_name')
       .eq('id', order_id)
       .single();
 
@@ -52,7 +64,6 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Only the owning user may expire their own order
     if (order.user_id !== user.id) {
       return new Response(JSON.stringify({ error: 'Forbidden' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -60,145 +71,84 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Idempotency: already expired — just return success with no double-refund
+    // Fast-path: already handled (avoids the RPC round-trip for the common case)
     if (order.status !== 'pending') {
-      console.log(`expire-order: order ${order_id} already in status '${order.status}', skipping refund`);
+      console.log(`expire-order: order ${order_id} already '${order.status}', skipping`);
       return new Response(JSON.stringify({
         refunded: false,
-        already_expired: true,
+        already_handled: true,
         status: order.status,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const paidAmount = Number(order.amount_paid);
+    // ── Atomic expiry: one DB transaction does expire + credit + tx record ──
+    const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc(
+      'process_order_expiry',
+      { p_order_id: order_id }
+    );
 
-    // Atomically flip pending → expired, and verify we actually won the race.
-    // Using .select('id') so Supabase returns the rows that were actually modified.
-    // If the UPDATE touches 0 rows it means the status changed between our read and write
-    // (OTP arrived → 'completed', or another expire-order call got here first → 'expired').
-    // In both cases we must NOT credit the wallet.
-    const { data: flippedRows, error: expireErr } = await supabaseAdmin
-      .from('orders')
-      .update({ status: 'expired' })
-      .eq('id', order_id)
-      .eq('status', 'pending') // guard: only flip pending → expired
-      .select('id');
-
-    if (expireErr) {
-      console.error('expire-order: failed to expire order', expireErr);
-      return new Response(JSON.stringify({ error: 'Failed to update order status' }), {
+    if (rpcErr) {
+      console.error('expire-order: process_order_expiry RPC failed', rpcErr);
+      return new Response(JSON.stringify({
+        error: 'Refund transaction failed — please contact support if your balance is incorrect',
+      }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500,
       });
     }
 
-    // No rows flipped — status changed between our read and write.
-    // Re-read to surface the actual current status to the caller.
-    if (!flippedRows || flippedRows.length === 0) {
-      const { data: recheck } = await supabaseAdmin
-        .from('orders')
-        .select('status')
-        .eq('id', order_id)
-        .single();
-      const currentStatus = recheck?.status ?? 'unknown';
-      console.log(`expire-order: UPDATE touched 0 rows for order ${order_id} — current status: ${currentStatus}`);
-      // If it's 'completed' the OTP arrived; if 'expired' another call got here first.
-      // Either way: no wallet credit, no error.
+    // RPC reported the order was already handled by a concurrent caller
+    if (!rpcResult.success) {
+      const reason = rpcResult.reason ?? 'unknown';
+      console.log(`expire-order: RPC returned success=false, reason=${reason}, status=${rpcResult.status}`);
       return new Response(JSON.stringify({
         refunded: false,
         already_handled: true,
-        status: currentStatus,
+        status: rpcResult.status ?? order.status,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Credit wallet_balance — fetch current balance then increment
-    const { data: profileNow, error: profileErr } = await supabaseAdmin
-      .from('user_profiles')
-      .select('wallet_balance')
-      .eq('id', user.id)
-      .single();
+    // ── DB committed — now send push notification (non-fatal if it fails) ──
+    const refundAmount = Number(rpcResult.refund_amount);
+    const newBalance   = Number(rpcResult.new_balance);
+    const projectName  = rpcResult.project_name ?? order.project_name ?? 'your purchase';
 
-    if (profileErr || !profileNow) {
-      console.error('expire-order: could not read wallet balance', profileErr);
-      // Order is already expired — don't fail the whole call, just log
-      return new Response(JSON.stringify({
-        refunded: false,
-        expired: true,
-        error: 'Could not credit wallet — contact support',
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 207,
-      });
-    }
+    console.log(`expire-order: refunded ₦${refundAmount} to user ${user.id} for order ${order_id}`);
 
-    const newBalance = Number(profileNow.wallet_balance) + paidAmount;
-    const { error: creditErr } = await supabaseAdmin
-      .from('user_profiles')
-      .update({ wallet_balance: newBalance })
-      .eq('id', user.id);
-
-    if (creditErr) {
-      console.error('expire-order: wallet credit failed', creditErr);
-      return new Response(JSON.stringify({
-        refunded: false,
-        expired: true,
-        error: 'Order expired but wallet credit failed — contact support',
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 207,
-      });
-    }
-
-    // Insert refund transaction record
-    const refundRef = order.order_reference
-      ? `timeout_${order.order_reference}`
-      : `timeout_${order_id.slice(0, 8)}_${Date.now()}`;
-
-    await supabaseAdmin.from('transactions').insert({
-      user_id: user.id,
-      amount: paidAmount,
-      type: 'credit',
-      reference: refundRef,
-      description: `Auto-refund: ${order.project_name || 'Purchase'} OTP not received within window`,
-    });
-
-    console.log(`expire-order: refunded ₦${paidAmount} to user ${user.id} for order ${order_id}`);
-
-    // Send push notification if the user has a registered push token
     try {
-      const { data: profileForPush } = await supabaseAdmin
+      const { data: profile } = await supabaseAdmin
         .from('user_profiles')
         .select('push_token')
         .eq('id', user.id)
         .single();
 
-      if (profileForPush?.push_token) {
+      if (profile?.push_token) {
         await fetch('https://exp.host/--/api/v2/push/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            to: profileForPush.push_token,
+            to: profile.push_token,
             title: '\u{1F4B0} Refund Processed',
-            body: `No OTP was received for ${order.project_name || 'your purchase'}. \u20a6${paidAmount.toLocaleString()} has been refunded to your wallet.`,
-            data: { type: 'expire_refund', order_id: order_id, amount: paidAmount },
+            body: `No OTP was received for ${projectName}. \u20a6${refundAmount.toLocaleString()} has been refunded to your wallet.`,
+            data: { type: 'expire_refund', order_id, amount: refundAmount },
             sound: 'default',
             priority: 'high',
           }),
         });
-        console.log(`expire-order: push notification sent to user ${user.id}`);
+        console.log(`expire-order: push sent to user ${user.id}`);
       }
     } catch (pushErr) {
-      // Non-fatal — refund already succeeded; just log the push failure
+      // Non-fatal: refund is already committed — just log
       console.warn(`expire-order: push notification failed for user ${user.id}:`, pushErr);
     }
 
     return new Response(JSON.stringify({
       refunded: true,
-      refund_amount: paidAmount,
+      refund_amount: refundAmount,
       new_balance: newBalance,
       status: 'expired',
     }), {
