@@ -42,6 +42,19 @@ export default function NumberDisplayScreen() {
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // When the context's expiry watcher flips the order to 'expired' while this
+  // screen is open, the DB polling below picks up status='expired'. Surface
+  // the refund amount from amount_paid so the UI shows the confirmed message.
+  useEffect(() => {
+    if (order?.status === 'expired' && !refundAmount) {
+      setExpired(true);
+      setTimeLeft(0);
+      setRefundAmount(Number(order.amount_paid));
+      clearInterval(pollRef.current!);
+      clearInterval(timerRef.current!);
+    }
+  }, [order?.status]);
+
   useEffect(() => {
     if (!order_id) return;
     requestNotificationPermissions();
@@ -177,16 +190,23 @@ export default function NumberDisplayScreen() {
   // startTimerFromRemaining replaces the old startTimer().
   // It accepts the actual remaining seconds (accounting for elapsed time since
   // order creation) so the countdown is always accurate when reopening an order.
+  // Timer is display-only: it counts down and flips the UI to "expired" state.
+  // The actual expire-order call is handled by OrderContext's app-level watcher,
+  // which fires every 30 s for any pending order past OTP_TIMEOUT regardless of
+  // which screen is open. triggerExpiry() is only kept as a one-time fallback for
+  // orders that are already past the window when this screen first opens.
   const startTimerFromRemaining = (initialRemaining: number) => {
     let remaining = initialRemaining;
-    timerRef.current = setInterval(async () => {
+    timerRef.current = setInterval(() => {
       remaining -= 1;
       setTimeLeft(remaining);
       if (remaining <= 0) {
         clearInterval(timerRef.current!);
         clearInterval(pollRef.current!);
         setExpired(true);
-        await triggerExpiry();
+        // Do NOT call triggerExpiry() here — OrderContext handles expiry app-wide.
+        // Show "processing refund" UI; the context watcher will update the order
+        // status and the polling loop will pick up the change.
       }
     }, 1000);
   };
