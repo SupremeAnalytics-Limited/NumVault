@@ -56,6 +56,11 @@ export default function CheckoutScreen() {
   const parsePurchaseError = (rawMessage: string): { message: string; hint?: string } => {
     const msg = rawMessage.replace(/^Socially:\s*/i, '').trim();
     const lower = msg.toLowerCase();
+    // NV-901: generic provider failure — already formatted by server, pass through cleanly
+    if (lower.includes('nv-901'))
+      return { message: 'Transaction could not be completed. Your payment has been refunded \u2014 please try again in a moment.', hint: 'Reference: NV-901' };
+    if (lower.includes('price') && lower.includes('changed'))
+      return { message: msg, hint: 'Prices update in real time. Go back to see the current price.' };
     if (lower.includes('insufficient') || lower.includes('balance') || lower.includes('fund'))
       return { message: msg, hint: 'Provider balance is low. Try again in a few minutes.' };
     if (lower.includes('unavailable') || lower.includes('no number') || lower.includes('stock'))
@@ -68,6 +73,8 @@ export default function CheckoutScreen() {
       return { message: msg, hint: 'Payment could not be verified. Contact support with your reference.' };
     return { message: msg };
   };
+
+  const isWhatsApp = (params.project_name || '').toLowerCase().includes('whatsapp');
 
   const executePurchase = async (reference: string | null, fromWallet: boolean) => {
     setPurchaseError(null);
@@ -249,6 +256,16 @@ export default function CheckoutScreen() {
           </View>
 
           <View style={styles.divider} />
+
+          {/* WhatsApp OTP delivery notice */}
+          {isWhatsApp && (
+            <View style={styles.deliveryNotice}>
+              <MaterialIcons name="info-outline" size={14} color={Colors.warning} />
+              <Text style={styles.deliveryNoticeText}>
+                OTP delivery for WhatsApp numbers currently has a lower success rate. If your code does not arrive, your payment will be automatically refunded.
+              </Text>
+            </View>
+          )}
 
           {/* Price breakdown */}
           <View style={styles.priceSection}>
@@ -486,6 +503,27 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   chargesNote: { color: Colors.primary, fontSize: 12, fontWeight: FontWeight.semibold },
+
+  // WhatsApp delivery notice
+  deliveryNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    backgroundColor: 'rgba(255,171,0,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,171,0,0.35)',
+    borderRadius: Radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginHorizontal: Spacing.lg,
+    marginBottom: 2,
+  },
+  deliveryNoticeText: {
+    flex: 1,
+    color: Colors.warning,
+    fontSize: 11,
+    lineHeight: 16,
+  },
 
   // Wallet banner
   walletBanner: {

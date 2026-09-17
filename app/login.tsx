@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   KeyboardAvoidingView, Platform, ScrollView, StatusBar,
@@ -16,7 +16,7 @@ import {
 } from '@/services/sentryService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
-type Mode = 'login' | 'register';
+type Mode = 'login' | 'register' | 'forgot';
 
 export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>('login');
@@ -26,10 +26,27 @@ export default function LoginScreen() {
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState('');
   const [showPass, setShowPass] = useState(false);
+  // Forgot-password state
+  const [forgotOtpSent, setForgotOtpSent] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { sendOTP, verifyOTPAndLogin, signInWithPassword, operationLoading } = useAuth();
   const { showAlert } = useAlert();
+
+  const switchMode = async (m: Mode) => {
+    await Haptics.selectionAsync();
+    setMode(m);
+    setOtpSent(false);
+    setOtp('');
+    setForgotOtpSent(false);
+    setNewPassword('');
+    setConfirmNewPassword('');
+  };
+
+  // ── Register handlers ──────────────────────────────────────────────────────
 
   const handleSendOTP = async () => {
     if (!email.trim()) {
@@ -66,9 +83,6 @@ export default function LoginScreen() {
     }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    // Step 1: Verify OTP — do NOT pass password here; the template's built-in
-    // updateUser call runs without waiting for the session and silently ignores
-    // failures, leaving the account with no working password.
     const { error: verifyError } = await verifyOTPAndLogin(email.trim().toLowerCase(), otp);
     if (verifyError) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -77,9 +91,6 @@ export default function LoginScreen() {
       return;
     }
 
-    // Step 2: Wait for the Supabase session that verifyOtp establishes to become
-    // fully active before calling updateUser. Without this wait, updateUser hits
-    // a timing race and fails with "Auth session missing".
     const sessionReady = await waitForSession();
     if (!sessionReady) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -90,7 +101,6 @@ export default function LoginScreen() {
       return;
     }
 
-    // Step 3: Set the password with one automatic retry.
     const passwordError = await setPasswordWithRetry(password);
     if (passwordError) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -98,11 +108,12 @@ export default function LoginScreen() {
     } else {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    // Account is created and session is live — navigate to main app.
     const { data: { session } } = await (await import('@/template')).getSupabaseClient().auth.getSession();
     if (session?.user?.id) trackSignupCompleted(session.user.id);
     router.replace('/(tabs)');
   };
+
+  // ── Login handler ──────────────────────────────────────────────────────────
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -123,12 +134,80 @@ export default function LoginScreen() {
     }
   };
 
-  const switchMode = async (m: Mode) => {
-    await Haptics.selectionAsync();
-    setMode(m);
-    setOtpSent(false);
-    setOtp('');
+  // ── Forgot-password handlers ───────────────────────────────────────────────
+
+  const handleForgotSendOTP = async () => {
+    if (!email.trim()) {
+      showAlert('Please enter your email address');
+      return;
+    }
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const { error } = await sendOTP(email.trim().toLowerCase());
+    if (error) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      showAlert('Error', error);
+    } else {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setForgotOtpSent(true);
+      showAlert('Code Sent', 'Check your email for the 4-digit reset code.');
+    }
   };
+
+  const handleResetPassword = async () => {
+    if (!email || !otp || !newPassword) {
+      showAlert('Missing fields', 'Please fill in all required fields.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      showAlert('Passwords do not match', 'Please make sure both passwords are the same.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      showAlert('Password too short', 'Password must be at least 6 characters.');
+      return;
+    }
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // Step 1: verify OTP to establish a session
+    const { error: verifyError } = await verifyOTPAndLogin(email.trim().toLowerCase(), otp);
+    if (verifyError) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      showAlert('Verification Failed', verifyError);
+      return;
+    }
+    // Step 2: wait for session then set new password
+    const sessionReady = await waitForSession();
+    if (!sessionReady) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      showAlert('Session Error', 'Could not establish session. Please try again.');
+      return;
+    }
+    const passwordError = await setPasswordWithRetry(newPassword);
+    if (passwordError) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      showAlert('Password Not Updated', passwordError);
+    } else {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      showAlert('Password Updated', 'Your password has been reset. You are now signed in.');
+    }
+    router.replace('/(tabs)');
+  };
+
+  // ── CTA wiring ─────────────────────────────────────────────────────────────
+
+  const handleCTA = () => {
+    if (mode === 'login') return handleLogin();
+    if (mode === 'register') return handleRegister();
+    if (mode === 'forgot') return forgotOtpSent ? handleResetPassword() : handleForgotSendOTP();
+  };
+
+  const ctaLabel = operationLoading ? 'Please wait...' :
+    mode === 'login' ? 'Sign In' :
+    mode === 'forgot' ? (forgotOtpSent ? 'Set New Password' : 'Send Reset Code') :
+    'Create Account';
+
+  const ctaDisabled = operationLoading ||
+    (mode === 'register' && !otpSent) ||
+    (mode === 'forgot' && forgotOtpSent && (!otp || !newPassword || !confirmNewPassword));
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -154,30 +233,43 @@ export default function LoginScreen() {
             <Text style={styles.logoSub}>SMS Verification Numbers, Instantly</Text>
           </View>
 
-          {/* Mode Toggle */}
-          <View style={styles.modeToggle}>
-            <TouchableOpacity
-              style={[styles.modeBtn, mode === 'login' && styles.modeBtnActive]}
-              onPress={() => switchMode('login')}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.modeBtnText, mode === 'login' && styles.modeBtnTextActive]}>
-                Sign In
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeBtn, mode === 'register' && styles.modeBtnActive]}
-              onPress={() => switchMode('register')}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.modeBtnText, mode === 'register' && styles.modeBtnTextActive]}>
-                Create Account
-              </Text>
-            </TouchableOpacity>
-          </View>
+          {/* Mode Toggle — hidden on forgot password screen */}
+          {mode !== 'forgot' ? (
+            <View style={styles.modeToggle}>
+              <TouchableOpacity
+                style={[styles.modeBtn, mode === 'login' && styles.modeBtnActive]}
+                onPress={() => switchMode('login')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.modeBtnText, mode === 'login' && styles.modeBtnTextActive]}>
+                  Sign In
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modeBtn, mode === 'register' && styles.modeBtnActive]}
+                onPress={() => switchMode('register')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.modeBtnText, mode === 'register' && styles.modeBtnTextActive]}>
+                  Create Account
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.forgotHeader}>
+              <TouchableOpacity onPress={() => switchMode('login')} style={styles.forgotBackBtn}>
+                <MaterialIcons name="arrow-back" size={18} color={Colors.textSecondary} />
+              </TouchableOpacity>
+              <View>
+                <Text style={styles.forgotTitle}>Reset Password</Text>
+                <Text style={styles.forgotSub}>We will send a verification code to your email</Text>
+              </View>
+            </View>
+          )}
 
           {/* Form */}
           <View style={styles.form}>
+            {/* Email — always shown */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email Address</Text>
               <View style={styles.inputRow}>
@@ -195,6 +287,7 @@ export default function LoginScreen() {
               </View>
             </View>
 
+            {/* Register: password fields */}
             {mode === 'register' && (
               <View style={styles.inputGroup}>
                 <View style={styles.inputRow}>
@@ -209,7 +302,7 @@ export default function LoginScreen() {
                     autoCapitalize="none"
                   />
                   <TouchableOpacity onPress={() => setShowPass(!showPass)}>
-                    <MaterialIcons name={showPass ? "visibility-off" : "visibility"} size={18} color={Colors.textMuted} />
+                    <MaterialIcons name={showPass ? 'visibility-off' : 'visibility'} size={18} color={Colors.textMuted} />
                   </TouchableOpacity>
                 </View>
                 <View style={[styles.inputRow, { marginTop: Spacing.sm }]}>
@@ -227,6 +320,7 @@ export default function LoginScreen() {
               </View>
             )}
 
+            {/* Login: password field + forgot link */}
             {mode === 'login' && (
               <View style={styles.inputGroup}>
                 <View style={styles.inputRow}>
@@ -241,12 +335,20 @@ export default function LoginScreen() {
                     autoCapitalize="none"
                   />
                   <TouchableOpacity onPress={() => setShowPass(!showPass)}>
-                    <MaterialIcons name={showPass ? "visibility-off" : "visibility"} size={18} color={Colors.textMuted} />
+                    <MaterialIcons name={showPass ? 'visibility-off' : 'visibility'} size={18} color={Colors.textMuted} />
                   </TouchableOpacity>
                 </View>
+                <TouchableOpacity
+                  style={styles.forgotLink}
+                  onPress={() => switchMode('forgot')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.forgotLinkText}>Forgot password?</Text>
+                </TouchableOpacity>
               </View>
             )}
 
+            {/* Register: send OTP button (before OTP entry) */}
             {mode === 'register' && !otpSent && (
               <TouchableOpacity
                 style={styles.otpBtn}
@@ -255,11 +357,12 @@ export default function LoginScreen() {
                 activeOpacity={0.8}
               >
                 <Text style={styles.otpBtnText}>
-                  {operationLoading ? "Sending..." : "Send Verification Code"}
+                  {operationLoading ? 'Sending...' : 'Send Verification Code'}
                 </Text>
               </TouchableOpacity>
             )}
 
+            {/* Register: OTP input */}
             {mode === 'register' && otpSent && (
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Verification Code</Text>
@@ -276,15 +379,75 @@ export default function LoginScreen() {
               </View>
             )}
 
+            {/* Forgot: send reset code button (before OTP entry) */}
+            {mode === 'forgot' && !forgotOtpSent && (
+              <TouchableOpacity
+                style={styles.otpBtn}
+                onPress={handleForgotSendOTP}
+                disabled={operationLoading}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.otpBtnText}>
+                  {operationLoading ? 'Sending...' : 'Send Reset Code'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Forgot: OTP + new password fields */}
+            {mode === 'forgot' && forgotOtpSent && (
+              <>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Verification Code</Text>
+                  <Text style={styles.otpHint}>Enter the 4-digit code sent to {email}</Text>
+                  <TextInput
+                    style={[styles.inputRow, styles.otpInput]}
+                    value={otp}
+                    onChangeText={setOtp}
+                    placeholder="0000"
+                    placeholderTextColor={Colors.textMuted}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                  />
+                </View>
+                <View style={styles.inputGroup}>
+                  <View style={styles.inputRow}>
+                    <MaterialIcons name="lock-outline" size={18} color={Colors.textMuted} style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      placeholder="New password"
+                      placeholderTextColor={Colors.textMuted}
+                      secureTextEntry={!showPass}
+                      autoCapitalize="none"
+                    />
+                    <TouchableOpacity onPress={() => setShowPass(!showPass)}>
+                      <MaterialIcons name={showPass ? 'visibility-off' : 'visibility'} size={18} color={Colors.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={[styles.inputRow, { marginTop: Spacing.sm }]}>
+                    <MaterialIcons name="lock" size={18} color={Colors.textMuted} style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={confirmNewPassword}
+                      onChangeText={setConfirmNewPassword}
+                      placeholder="Confirm new password"
+                      placeholderTextColor={Colors.textMuted}
+                      secureTextEntry={!showPass}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </View>
+              </>
+            )}
+
             <TouchableOpacity
-              style={[styles.cta, operationLoading && styles.ctaDisabled]}
-              onPress={mode === 'login' ? handleLogin : handleRegister}
-              disabled={operationLoading || (mode === 'register' && !otpSent)}
+              style={[styles.cta, ctaDisabled && styles.ctaDisabled]}
+              onPress={handleCTA}
+              disabled={ctaDisabled}
               activeOpacity={0.85}
             >
-              <Text style={styles.ctaText}>
-                {operationLoading ? "Please wait..." : mode === 'login' ? "Sign In" : "Create Account"}
-              </Text>
+              <Text style={styles.ctaText}>{ctaLabel}</Text>
             </TouchableOpacity>
           </View>
 
@@ -362,6 +525,43 @@ const styles = StyleSheet.create({
   },
   modeBtnTextActive: {
     color: Colors.black,
+  },
+  // Forgot password header
+  forgotHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  forgotBackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  forgotTitle: {
+    color: Colors.text,
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+  },
+  forgotSub: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  forgotLink: {
+    alignSelf: 'flex-end',
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+  },
+  forgotLinkText: {
+    color: Colors.primary,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.medium,
   },
   form: {
     gap: Spacing.md,

@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  StatusBar, ActivityIndicator, TextInput,
+  StatusBar, ActivityIndicator, TextInput, AppState,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -39,10 +39,35 @@ export default function OrdersScreen() {
   const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [serviceFilter, setServiceFilter] = useState<string>('all');
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const appStateRef = useRef(AppState.currentState);
+
+  const hasPending = orders.some((o) => o.status === 'pending');
 
   useEffect(() => {
     if (user) refreshOrders();
   }, [user]);
+
+  // Auto-refresh: poll every 15 s while there are pending orders;
+  // always re-fetch when app comes back to foreground.
+  useEffect(() => {
+    if (!user) return;
+    // Use a shorter 15 s interval only when pending orders exist so we catch
+    // OTP arrivals and refunds quickly; fall back to 30 s otherwise.
+    const interval = hasPending ? 15_000 : 30_000;
+    pollIntervalRef.current = setInterval(() => refreshOrders(), interval);
+    const sub = AppState.addEventListener('change', (next) => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        refreshOrders();
+      }
+      appStateRef.current = next;
+    });
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      sub.remove();
+    };
+  }, [user, hasPending]);
+
 
   // Unique service names derived from orders
   const serviceNames = useMemo(() => {

@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  StatusBar, Modal, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform,
+  StatusBar, Modal, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, AppState,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +28,8 @@ export default function WalletScreen() {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [webViewUrl, setWebViewUrl] = useState<string | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const appStateRef = useRef(AppState.currentState);
 
   const LOW_BALANCE_THRESHOLD = 500;
   const lowBalanceNotifiedRef = React.useRef(false);
@@ -39,6 +41,27 @@ export default function WalletScreen() {
       refreshTransactions();
     }
   }, [user]);
+
+  // Auto-refresh: poll every 30 s + re-fetch when app comes to foreground
+  useEffect(() => {
+    if (!user) return;
+    pollIntervalRef.current = setInterval(() => {
+      refreshProfile();
+      refreshTransactions();
+    }, 30_000);
+    const sub = AppState.addEventListener('change', (next) => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        refreshProfile();
+        refreshTransactions();
+      }
+      appStateRef.current = next;
+    });
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      sub.remove();
+    };
+  }, [user]);
+
 
   // Watch for low balance and fire notification once per session
   useEffect(() => {

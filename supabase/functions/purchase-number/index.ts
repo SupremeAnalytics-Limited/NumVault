@@ -60,6 +60,59 @@ Deno.serve(async (req: Request) => {
         status: 400,
       });
     }
+
+    // ── SERVER-SIDE PRICE VALIDATION ─────────────────────────────────────────
+    // Fetch the authoritative price from Socially.ng before debiting anything.
+    // This prevents clients from sending a manipulated amount_paid value.
+    const MARKUP = 1.4;
+    try {
+      const socially_url = Deno.env.get('SUPABASE_URL') ?? '';
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      const priceRes = await fetch(`${socially_url}/functions/v1/socially-proxy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+        body: JSON.stringify({
+          path: '/sms/verification/service/provider/packages',
+          method: 'POST',
+          body: { provider_code, country_code },
+        }),
+      });
+      const priceData = await priceRes.json();
+      const pkgs: any[] =
+        Array.isArray(priceData?.packages) ? priceData.packages :
+        Array.isArray(priceData?.data) ? priceData.data :
+        Array.isArray(priceData?.result) ? priceData.result :
+        Array.isArray(priceData) ? priceData : [];
+      const matchingPkg = pkgs.find(
+        (p: any) => String(p.project_code ?? p.id ?? '') === String(project_code)
+      );
+      if (matchingPkg) {
+        const wholesaleKobo = Number(matchingPkg.price ?? 0);
+        const expectedRetail = Math.ceil(wholesaleKobo * MARKUP);
+        const clientRetail = Math.ceil(Number(amount_paid));
+        // Allow ±2 naira tolerance for rounding differences
+        if (Math.abs(clientRetail - expectedRetail) > 2) {
+          console.warn(
+            `Price mismatch: client sent ${clientRetail}, server expects ${expectedRetail} for ${project_code}/${country_code}`
+          );
+          return new Response(JSON.stringify({
+            error: 'The price for this service has changed. Please go back and try again.',
+            price_changed: true,
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 409,
+          });
+        }
+        console.log(`Price validated: client=${clientRetail}, server=${expectedRetail} ✓`);
+      } else {
+        console.warn(`Price validation: package ${project_code} not found in response — proceeding without validation`);
+      }
+    } catch (priceErr) {
+      // Price validation is a best-effort guard. If the proxy is temporarily
+      // unavailable, log the failure and continue rather than blocking the purchase.
+      console.warn('Price validation fetch failed (non-blocking):', priceErr);
+    }
+    // ── END PRICE VALIDATION ─────────────────────────────────────────────────
     if (!use_wallet && !paystack_reference) {
       return new Response(JSON.stringify({ error: 'Provide paystack_reference or set use_wallet: true' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -231,13 +284,25 @@ Deno.serve(async (req: Request) => {
     console.log('Socially proxy response:', JSON.stringify(sociallyData));
 
     if (!proxyRes.ok || sociallyData.status === false) {
-      const sociallyError =
+      const rawSociallyError =
         sociallyData.message ||
         sociallyData.error ||
         sociallyData.errors ||
         sociallyData.msg ||
         (typeof sociallyData === 'string' ? sociallyData : null) ||
-        'Failed to purchase number from provider';
+        null;
+
+      // NV-901: generic / unrecognised provider failure — surface a clean
+      // customer-friendly message instead of raw API noise.
+      const isGenericFailure = !rawSociallyError ||
+        String(rawSociallyError).toLowerCase().includes('transaction failed') ||
+        String(rawSociallyError).toLowerCase().includes('unknown error') ||
+        String(rawSociallyError).toLowerCase() === 'false' ||
+        String(rawSociallyError).trim() === '';
+
+      const sociallyError = isGenericFailure
+        ? 'NV-901: Transaction could not be completed. Your payment has been refunded — please try again in a moment.'
+        : rawSociallyError;
 
       // ── REFUND/ROLLBACK ──────────────────────────────────────────────────────
       // Safe to refund here: the lock insert succeeded above, meaning this is
