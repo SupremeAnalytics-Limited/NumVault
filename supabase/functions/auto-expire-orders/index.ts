@@ -9,14 +9,16 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
 // PostgreSQL transaction — if any step fails the whole thing rolls back and
 // the order remains pending so the next cron run can retry cleanly.
 //
-// Push notifications are sent AFTER each successful DB commit so a notification
-// failure never causes a committed refund to appear missing.
+// Authoritative sequence per order:
+//   process_order_expiry RPC
+//     → order marked expired
+//     → wallet_balance credited atomically
+//     → refund transaction created
+//     → successful RPC response
+//   → send push notification   ← OUTSIDE the DB transaction, non-fatal
 //
 // Idempotent: the RPC uses FOR UPDATE + status check, so concurrent cron runs
 // and client-triggered expire-order calls are safe — only one commits.
-//
-// Invoke via Supabase scheduled cron every 2 minutes, or manually with the
-// service-role key for testing.
 
 const OTP_TIMEOUT_MINUTES = 5; // must match OTP_TIMEOUT in constants/config.ts (300_000 ms)
 
@@ -34,8 +36,6 @@ Deno.serve(async (req: Request) => {
     console.log(`auto-expire-orders: scanning pending orders created before ${cutoff}`);
 
     // Fetch all pending orders older than the timeout window.
-    // We only need enough fields here to identify and notify; the RPC fetches
-    // what it needs inside its own transaction.
     const { data: staleOrders, error: fetchErr } = await supabaseAdmin
       .from('orders')
       .select('id, user_id, amount_paid, project_name')
@@ -63,8 +63,8 @@ Deno.serve(async (req: Request) => {
     const skipped: string[] = [];
 
     for (const order of staleOrders) {
-      const orderId: string   = order.id;
-      const userId: string    = order.user_id;
+      const orderId: string     = order.id;
+      const userId: string      = order.user_id;
       const projectName: string = order.project_name ?? 'Purchase';
 
       // ── Atomic expiry: one DB transaction does expire + credit + tx record ──
@@ -80,7 +80,7 @@ Deno.serve(async (req: Request) => {
       }
 
       if (!rpcResult.success) {
-        // Already handled (by expire-order or a concurrent cron run) — not an error
+        // Already handled by expire-order or a concurrent cron run — not an error
         console.log(`auto-expire-orders: order ${orderId} already handled (${rpcResult.reason}), skipping`);
         skipped.push(orderId);
         continue;
@@ -90,6 +90,7 @@ Deno.serve(async (req: Request) => {
       console.log(`auto-expire-orders: refunded ₦${refundAmount} to user ${userId} for order ${orderId}`);
 
       // ── DB committed — now send push notification (non-fatal if it fails) ──
+      // The wallet credit and transaction record are already persisted.
       try {
         const { data: profile } = await supabaseAdmin
           .from('user_profiles')
@@ -98,7 +99,7 @@ Deno.serve(async (req: Request) => {
           .single();
 
         if (profile?.push_token) {
-          await fetch('https://exp.host/--/api/v2/push/send', {
+          const pushRes = await fetch('https://exp.host/--/api/v2/push/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -110,11 +111,26 @@ Deno.serve(async (req: Request) => {
               priority: 'high',
             }),
           });
-          console.log(`auto-expire-orders: push sent to user ${userId}`);
+
+          if (!pushRes.ok) {
+            const pushBody = await pushRes.text().catch(() => '(unreadable body)');
+            console.error(`auto-expire-orders: Expo push API HTTP error ${pushRes.status} for user ${userId}:`, pushBody);
+          } else {
+            const pushJson = await pushRes.json().catch(() => null);
+            const pushStatus = pushJson?.data?.[0]?.status ?? pushJson?.data?.status;
+            const pushError  = pushJson?.data?.[0]?.message ?? pushJson?.errors;
+            if (pushStatus === 'error' || pushError) {
+              console.error(`auto-expire-orders: Expo push API returned error for user ${userId}:`, pushJson);
+            } else {
+              console.log(`auto-expire-orders: push notification accepted by Expo for user ${userId}`);
+            }
+          }
+        } else {
+          console.log(`auto-expire-orders: no push_token for user ${userId}, skipping notification`);
         }
       } catch (pushErr) {
         // Non-fatal — refund is already committed
-        console.warn(`auto-expire-orders: push notification failed for user ${userId}:`, pushErr);
+        console.warn(`auto-expire-orders: push notification threw for user ${userId}:`, pushErr);
       }
 
       expired.push(orderId);

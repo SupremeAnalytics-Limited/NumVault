@@ -14,6 +14,11 @@ Notifications.setNotificationHandler({
   }),
 });
 
+/** Returns true if the string looks like a valid Expo push token. */
+function isValidExpoPushToken(token: string): boolean {
+  return typeof token === 'string' && token.startsWith('ExponentPushToken[') && token.endsWith(']');
+}
+
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
 
@@ -24,29 +29,85 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   return status === 'granted';
 }
 
-// Register the device's Expo push token in user_profiles so server-side
-// functions (e.g. auto-expire-orders) can send push notifications.
+/**
+ * Set up the Android notification channel BEFORE attempting push registration.
+ * This must be called early (app/_layout.tsx NotificationSetup already does it)
+ * but we guard here too so registerPushToken is self-contained.
+ */
+async function ensureAndroidChannel(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync('otp', {
+    name: 'OTP Alerts',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 100, 250],
+    sound: 'default',
+    lightColor: '#00C853',
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    bypassDnd: true,
+  });
+}
+
+/**
+ * Register the device's Expo push token in user_profiles so server-side
+ * functions (e.g. auto-expire-orders) can send push notifications.
+ *
+ * Errors are no longer silently swallowed — any failure is logged with
+ * enough context to diagnose the problem without exposing credentials.
+ */
 export async function registerPushToken(): Promise<void> {
   if (Platform.OS === 'web') return;
   try {
+    await ensureAndroidChannel();
+
     const granted = await requestNotificationPermissions();
-    if (!granted) return;
+    if (!granted) {
+      console.log('registerPushToken: notification permission not granted, skipping registration');
+      return;
+    }
+
+    // No EAS projectId is configured for this project, so we call
+    // getExpoPushTokenAsync() without options and rely on the bare Expo
+    // token issued for the development/production build.
     const tokenData = await Notifications.getExpoPushTokenAsync();
     const pushToken = tokenData.data;
-    if (!pushToken) return;
+
+    if (!pushToken) {
+      console.warn('registerPushToken: Expo returned empty push token');
+      return;
+    }
+
+    if (!isValidExpoPushToken(pushToken)) {
+      console.warn('registerPushToken: token does not match expected Expo format:', pushToken.slice(0, 30));
+      return;
+    }
 
     const supabase = getSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      console.warn('registerPushToken: no authenticated user, skipping DB write');
+      return;
+    }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('user_profiles')
       .update({ push_token: pushToken })
       .eq('id', user.id);
 
-    console.log('Push token registered:', pushToken);
+    if (updateError) {
+      // Explicit error — not silently swallowed
+      console.error('registerPushToken: failed to save push token to user_profiles:', {
+        code: updateError.code,
+        message: updateError.message,
+        details: updateError.details,
+        userId: user.id,
+      });
+      throw new Error(`Push token DB update failed: ${updateError.message}`);
+    }
+
+    console.log('registerPushToken: token saved for user', user.id, '— token prefix:', pushToken.slice(0, 30));
   } catch (e) {
-    console.warn('Failed to register push token:', e);
+    // Surface with enough context for debugging; never expose tokens in logs
+    console.error('registerPushToken: unhandled error during registration:', e instanceof Error ? e.message : String(e));
   }
 }
 

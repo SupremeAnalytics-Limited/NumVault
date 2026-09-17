@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, StatusBar,
-  ScrollView, ActivityIndicator, Linking,
+  ScrollView, ActivityIndicator, Linking, AppState, AppStateStatus,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -41,6 +41,9 @@ export default function NumberDisplayScreen() {
 
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // Absolute expiry wall-clock timestamp so the countdown is always accurate
+  // regardless of how long the app was backgrounded.
+  const expiryAtRef = useRef<number>(0);
 
   // When the context's expiry watcher flips the order to 'expired' while this
   // screen is open, the DB polling below picks up status='expired'. Surface
@@ -88,11 +91,12 @@ export default function NumberDisplayScreen() {
       return; // ← do NOT start timer or polling
     }
 
-    // Fresh pending order — start the countdown + polling.
-    // Account for time already elapsed since order creation so the displayed
-    // timer matches reality (e.g. if user left and came back).
-    const elapsed = Math.floor((Date.now() - new Date(data.created_at).getTime()) / 1000);
-    const remaining = Math.max(0, OTP_TIMEOUT / 1000 - elapsed);
+    // Compute absolute expiry timestamp once from the order's creation time.
+    // All countdown ticks read from the real clock against this value so
+    // backgrounding cannot desync the displayed time.
+    const expiry = new Date(data.created_at).getTime() + OTP_TIMEOUT;
+    expiryAtRef.current = expiry;
+    const remaining = Math.max(0, Math.ceil((expiry - Date.now()) / 1000));
 
     if (remaining === 0) {
       // Already past the window by the time this screen opened — trigger expiry immediately.
@@ -103,7 +107,7 @@ export default function NumberDisplayScreen() {
     }
 
     setTimeLeft(remaining);
-    startTimerFromRemaining(remaining);
+    startDisplayTimer();
   };
 
   // Extracted expiry call so it can be reused by both the timer and the
@@ -187,29 +191,44 @@ export default function NumberDisplayScreen() {
     }, OTP_POLL_INTERVAL);
   };
 
-  // startTimerFromRemaining replaces the old startTimer().
-  // It accepts the actual remaining seconds (accounting for elapsed time since
-  // order creation) so the countdown is always accurate when reopening an order.
-  // Timer is display-only: it counts down and flips the UI to "expired" state.
-  // The actual expire-order call is handled by OrderContext's app-level watcher,
-  // which fires every 30 s for any pending order past OTP_TIMEOUT regardless of
-  // which screen is open. triggerExpiry() is only kept as a one-time fallback for
-  // orders that are already past the window when this screen first opens.
-  const startTimerFromRemaining = (initialRemaining: number) => {
-    let remaining = initialRemaining;
+  // startDisplayTimer: pure wall-clock countdown — never maintains its own
+  // "remaining" counter. Each tick re-reads Date.now() against the fixed
+  // expiryAtRef so backgrounding for any duration cannot desync the display.
+  // The actual expire-order call is handled by OrderContext's app-level watcher.
+  const startDisplayTimer = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
-      remaining -= 1;
-      setTimeLeft(remaining);
-      if (remaining <= 0) {
+      const rem = Math.max(0, Math.ceil((expiryAtRef.current - Date.now()) / 1000));
+      setTimeLeft(rem);
+      if (rem <= 0) {
         clearInterval(timerRef.current!);
         clearInterval(pollRef.current!);
         setExpired(true);
         // Do NOT call triggerExpiry() here — OrderContext handles expiry app-wide.
-        // Show "processing refund" UI; the context watcher will update the order
-        // status and the polling loop will pick up the change.
       }
     }, 1000);
-  };
+  }, []);
+
+  // AppState listener: when the app returns from background/inactive, immediately
+  // recalculate remaining time from the wall clock and restart the display timer
+  // so the countdown is never stale after the app resumes.
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active' && expiryAtRef.current > 0 && !expired) {
+        const rem = Math.max(0, Math.ceil((expiryAtRef.current - Date.now()) / 1000));
+        setTimeLeft(rem);
+        if (rem <= 0) {
+          setExpired(true);
+          clearInterval(timerRef.current!);
+          clearInterval(pollRef.current!);
+        } else {
+          startDisplayTimer();
+        }
+      }
+    };
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, [expired, startDisplayTimer]);
 
   const handleRequestOTP = async () => {
     if (!order?.order_reference) return;

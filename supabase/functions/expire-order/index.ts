@@ -9,8 +9,17 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
 // which runs all three writes inside one PostgreSQL transaction so a partial
 // failure can never leave the wallet short-changed or the order stuck.
 //
+// Authoritative sequence:
+//   process_order_expiry RPC
+//     → order marked expired
+//     → wallet_balance credited atomically
+//     → refund transaction created
+//     → successful RPC response
+//   → refresh wallet / order state on client
+//   → send push notification   ← OUTSIDE the DB transaction, non-fatal
+//
 // Push notification is sent AFTER the DB commit so a notification failure can
-// never cause the refund to be rolled back.
+// NEVER cause the refund to be rolled back or appear as missing.
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req);
@@ -113,6 +122,8 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── DB committed — now send push notification (non-fatal if it fails) ──
+    // The wallet credit and transaction record are already persisted.
+    // Any error below must not affect the refund or the response to the client.
     const refundAmount = Number(rpcResult.refund_amount);
     const newBalance   = Number(rpcResult.new_balance);
     const projectName  = rpcResult.project_name ?? order.project_name ?? 'your purchase';
@@ -127,7 +138,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (profile?.push_token) {
-        await fetch('https://exp.host/--/api/v2/push/send', {
+        const pushRes = await fetch('https://exp.host/--/api/v2/push/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -139,11 +150,26 @@ Deno.serve(async (req: Request) => {
             priority: 'high',
           }),
         });
-        console.log(`expire-order: push sent to user ${user.id}`);
+
+        if (!pushRes.ok) {
+          const pushBody = await pushRes.text().catch(() => '(unreadable body)');
+          console.error(`expire-order: Expo push API HTTP error ${pushRes.status} for user ${user.id}:`, pushBody);
+        } else {
+          const pushJson = await pushRes.json().catch(() => null);
+          const pushStatus = pushJson?.data?.[0]?.status ?? pushJson?.data?.status;
+          const pushError  = pushJson?.data?.[0]?.message ?? pushJson?.errors;
+          if (pushStatus === 'error' || pushError) {
+            console.error(`expire-order: Expo push API returned error for user ${user.id}:`, pushJson);
+          } else {
+            console.log(`expire-order: push notification accepted by Expo for user ${user.id}`);
+          }
+        }
+      } else {
+        console.log(`expire-order: no push_token for user ${user.id}, skipping notification`);
       }
     } catch (pushErr) {
       // Non-fatal: refund is already committed — just log
-      console.warn(`expire-order: push notification failed for user ${user.id}:`, pushErr);
+      console.warn(`expire-order: push notification threw for user ${user.id}:`, pushErr);
     }
 
     return new Response(JSON.stringify({

@@ -1,7 +1,8 @@
-import React, { createContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useState, useCallback, useEffect, useRef, useContext, ReactNode } from 'react';
 import { getSupabaseClient } from '@/template';
 import { fetchOrders, fetchTransactions, fetchOrderStatus, Order, Transaction } from '@/services/orderService';
 import { OTP_TIMEOUT } from '@/constants/config';
+import { WalletContext } from '@/contexts/WalletContext';
 
 const supabase = getSupabaseClient();
 
@@ -25,6 +26,10 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Access wallet refresh without prop-drilling. WalletProvider is above
+  // OrderProvider in app/_layout.tsx so this context is always available.
+  const walletCtx = useContext(WalletContext);
 
   const refreshOrders = useCallback(async () => {
     try {
@@ -90,6 +95,19 @@ export function OrderProvider({ children }: { children: ReactNode }) {
               o.id === order.id ? { ...o, status: finalStatus } : o
             )
           );
+
+          // After a successful refund, sync wallet balance and transaction history
+          // from the DB so Available Balance updates without user interaction.
+          // refreshProfile fetches user_profiles.wallet_balance (the authoritative value);
+          // refreshTransactions fetches the new +refund credit row.
+          if (result.refunded) {
+            walletCtx?.refreshProfile().catch((e) =>
+              console.warn('OrderContext: wallet refresh after refund failed', e)
+            );
+            refreshTransactions().catch((e) =>
+              console.warn('OrderContext: tx refresh after refund failed', e)
+            );
+          }
         }
       } catch (e) {
         console.warn(`OrderContext: expire-order failed for ${order.id}`, e);
