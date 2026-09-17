@@ -17,16 +17,19 @@ const { width, height } = Dimensions.get('window');
 const SCREENS = [
   {
     image: require('@/assets/images/nv_s1.png'),
+    label: "Privacy",
     headline: "Your number is more exposed than you think",
-    subtext: "Every sign-up form, every stranger you meet online, every app you download — they all want your real number. NumVault gives you a private one instead.",
+    subtext: "Every sign-up form, every stranger you meet online, every app you download — they all want your personal phone number, with the possibility of it becoming another thing tied to your identity that can get leaked or get sold. Privacy shouldn't be optional by default",
   },
   {
     image: require('@/assets/images/nv_s2.png'),
-    headline: "Privacy shouldn't be optional",
-    subtext: "Protect yourself from spam, harassment, and SIM-swap fraud. Use NumVault for dating apps, online marketplaces, and any sign-up — without ever exposing your real number.",
+    label: "Possibilities",
+    headline: "No subscription, No rent. Pay as you go.",
+    subtext: "Choose from 2,300+ apps & services and pay only when you need a number without being locked into a monthly subscription. Your purchased number belongs to you for that service.",
   },
   {
     image: require('@/assets/images/nv_s3.png'),
+    label: "Capacity",
     headline: "Here's exactly how it works",
     steps: [
       { num: "1", text: "Choose what you're signing up for" },
