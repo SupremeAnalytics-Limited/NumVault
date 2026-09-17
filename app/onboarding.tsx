@@ -31,6 +31,7 @@ const SCREENS = [
     image: require('@/assets/images/nv_s3.png'),
     label: "Capacity",
     headline: "Here's exactly how it works",
+    subtext: "Have numbers for different purposes — personal, business, projects, accounts, and more. With 2,300+ apps & services available, you have the capacity to create separation wherever you need it.",
     steps: [
       { num: "1", text: "Choose what you're signing up for" },
       { num: "2", text: "Pick a number" },
@@ -123,7 +124,8 @@ export default function OnboardingScreen() {
 
         {screen.subtext ? (
           <Text style={styles.subtext}>{screen.subtext}</Text>
-        ) : screen.steps ? (
+        ) : null}
+        {screen.steps ? (
           <View style={styles.stepsContainer}>
             {screen.steps.map((step) => (
               <View key={step.num} style={styles.stepRow}>
