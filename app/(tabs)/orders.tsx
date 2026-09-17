@@ -35,38 +35,50 @@ const STATUS_FILTER_LABELS: { key: StatusFilter; label: string }[] = [
 export default function OrdersScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { orders, loading, refreshOrders } = useOrders();
+  const { orders, loading, refreshOrders, refreshOrderStatus } = useOrders();
   const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [serviceFilter, setServiceFilter] = useState<string>('all');
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appStateRef = useRef(AppState.currentState);
 
-  const hasPending = orders.some((o) => o.status === 'pending');
+  const pendingOrderIds = orders
+    .filter((o) => o.status === 'pending')
+    .map((o) => o.id);
+  const hasPending = pendingOrderIds.length > 0;
 
   useEffect(() => {
     if (user) refreshOrders();
   }, [user]);
 
-  // Auto-refresh: poll every 15 s while there are pending orders;
-  // always re-fetch when app comes back to foreground.
+  // Auto-refresh: while pending orders exist, poll only their status every 10 s
+  // (targeted fetch instead of full list re-pull). On foreground, do a full refresh.
   useEffect(() => {
     if (!user) return;
-    // Use a shorter 15 s interval only when pending orders exist so we catch
-    // OTP arrivals and refunds quickly; fall back to 30 s otherwise.
-    const interval = hasPending ? 15_000 : 30_000;
-    pollIntervalRef.current = setInterval(() => refreshOrders(), interval);
+
+    if (hasPending) {
+      // Poll individual pending order statuses — much cheaper than full list
+      pollIntervalRef.current = setInterval(() => {
+        pendingOrderIds.forEach((id) => refreshOrderStatus(id));
+      }, 10_000);
+    } else {
+      // No pending orders — no polling needed
+      pollIntervalRef.current = null;
+    }
+
     const sub = AppState.addEventListener('change', (next) => {
       if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        // Full refresh on foreground to catch any state we missed
         refreshOrders();
       }
       appStateRef.current = next;
     });
+
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
       sub.remove();
     };
-  }, [user, hasPending]);
+  }, [user, hasPending, pendingOrderIds.join(',')]);
 
 
   // Unique service names derived from orders

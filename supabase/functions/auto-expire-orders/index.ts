@@ -13,7 +13,7 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
 // Idempotent: uses optimistic locking (.eq('status','pending')) so concurrent runs
 // never double-credit. Each order is processed at most once.
 
-const OTP_TIMEOUT_MINUTES = 10; // must match OTP_TIMEOUT in constants/config.ts (600_000 ms)
+const OTP_TIMEOUT_MINUTES = 5; // must match OTP_TIMEOUT in constants/config.ts (300_000 ms)
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req);

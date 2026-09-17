@@ -54,6 +54,21 @@ export async function fetchOrder(id: string): Promise<Order | null> {
   return data;
 }
 
+/**
+ * Fetch only the mutable fields of a single pending order (status + otp).
+ * Used by the order-polling loop to avoid re-fetching the entire list.
+ */
+export async function fetchOrderStatus(id: string): Promise<Pick<Order, 'id' | 'status' | 'otp' | 'phone_number'> | null> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, status, otp, phone_number')
+    .eq('id', id)
+    .single();
+
+  if (error) return null;
+  return data;
+}
+
 export async function fetchTransactions(): Promise<Transaction[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
