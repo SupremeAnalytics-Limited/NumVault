@@ -262,7 +262,7 @@ export default function CheckoutScreen() {
             <View style={styles.deliveryNotice}>
               <MaterialIcons name="info-outline" size={14} color={Colors.warning} />
               <Text style={styles.deliveryNoticeText}>
-                OTP delivery for WhatsApp numbers currently has a lower success rate. If your code does not arrive, your payment will be automatically refunded.
+                OTP delivery for WhatsApp numbers currently has a ~25% success rate. If your code does not arrive, your payment will be automatically refunded.
               </Text>
             </View>
           )}
