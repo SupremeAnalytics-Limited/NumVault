@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, ActivityIndicator, Share, TextInput,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -21,6 +21,50 @@ import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme
 
 type Screen = 'landing' | 'enroll' | 'qualifying' | 'pending_review' | 'eligible' | 'active_lead';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// ── 3-step landing intro ──────────────────────────────────────────────────────
+const LANDING_STEPS = [
+  {
+    label: 'The Product',
+    icon: 'phone-android' as const,
+    title: 'What NumVault does',
+    body: 'NumVault gives customers separate phone numbers for different digital purposes — personal, business, platforms, services, and more.\n\nPay as you go. No subscription. 2,300+ apps and services.\n\nThe core idea is separation of concern: one number for work, another for online platforms, another for sign-ups — without mixing everything into one personal number.',
+    highlights: null as null | { icon: string; label: string; sub: string }[],
+    bullets: null as null | { text: string; check: boolean }[],
+  },
+  {
+    label: 'The Opportunity',
+    icon: 'lightbulb-outline' as const,
+    title: 'Why this is an opportunity for students',
+    body: 'The demand NumVault addresses exists in every student network — freelancers, entrepreneurs, online workers, creators, small-business owners. These are people who genuinely need a private number.\n\nThrough this program you develop practical experience in customer acquisition, digital marketing, referral marketing, and SaaS business growth.',
+    highlights: [
+      { icon: 'groups', label: 'Customer Acquisition', sub: 'Find and convert genuine customers' },
+      { icon: 'campaign', label: 'Digital Marketing', sub: 'Communicate the value of a digital product' },
+      { icon: 'trending-up', label: 'Performance Management', sub: 'Work toward measurable targets' },
+    ],
+    bullets: null,
+  },
+  {
+    label: 'The Path',
+    icon: 'emoji-events' as const,
+    title: 'How you qualify for the paid opportunity',
+    body: null as null | string,
+    highlights: [
+      { icon: 'groups', label: '76 customers in 30 days', sub: 'Unpaid qualification stage' },
+      { icon: 'manage-search', label: 'Eligibility review', sub: 'Admin verifies your acquisition history' },
+      { icon: 'payments', label: 'Become a NumVault Lead', sub: '₦50,000 per 38-customer cycle' },
+      { icon: 'calendar-today', label: 'Up to ₦100,000/month', sub: 'Maximum across 6 monthly windows' },
+    ],
+    bullets: [
+      { text: 'Sign up through your referral code', check: true },
+      { text: 'Purchase at least one phone number', check: true },
+      { text: 'Number successfully delivered', check: true },
+      { text: 'Signup or referral click alone', check: false },
+    ],
+  },
+];
+
 export default function AcquisitionProgramScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -32,6 +76,10 @@ export default function AcquisitionProgramScreen() {
   const [payouts, setPayouts] = useState<LeadPayout[]>([]);
   const [pitches, setPitches] = useState<PitchItem[]>([]);
   const [screen, setScreen] = useState<Screen>('landing');
+
+  // Landing step pager
+  const [landingStep, setLandingStep] = useState(0);
+  const landingScrollRef = useRef<ScrollView>(null);
 
   // Enroll form
   const [enrollName, setEnrollName] = useState('');
@@ -72,14 +120,12 @@ export default function AcquisitionProgramScreen() {
   const mapStatusToScreen = (p: AcquisitionParticipant): Screen => {
     switch (p.status) {
       case 'qualifying': {
-        const days = daysRemainingInQualification(p.qualification_start_date);
-        if (days <= 0 && p.qualification_customers_count < 76) return 'qualifying'; // expired window — still show, allow re-enroll
         if (p.qualification_customers_count >= 76) return 'pending_review';
         return 'qualifying';
       }
       case 'eligible_not_joined': return 'eligible';
       case 'active_lead': return 'active_lead';
-      case 'inactive': return 'qualifying'; // show progress even if inactive
+      case 'inactive': return 'qualifying';
       default: return 'landing';
     }
   };
@@ -150,7 +196,6 @@ export default function AcquisitionProgramScreen() {
   const qualProgress = Math.min(qualCount / 76, 1);
   const windowExpired = daysLeft <= 0 && qualCount < 76 && participant?.status === 'qualifying';
 
-  // Current month cycle progress for active leads
   const cycleProgress = (() => {
     if (participant?.status !== 'active_lead' || !participant.active_lead_start_month) return null;
     const windowStart = getCurrentMonthStart().toISOString().split('T')[0];
@@ -182,63 +227,134 @@ export default function AcquisitionProgramScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      {/* ── LANDING ── */}
+      {/* ── LANDING — 3-step progressive intro ── */}
       {screen === 'landing' && (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-          <View style={styles.heroCard}>
-            <View style={styles.heroIcon}>
-              <MaterialIcons name="groups" size={36} color={Colors.primary} />
-            </View>
-            <Text style={styles.heroTitle}>NumVault Acquisition Program for Students</Text>
-            <Text style={styles.heroSub}>
-              Help NumVault reach people who genuinely need private phone numbers. Gain real customer-acquisition experience — and qualify for a paid NumVault Lead opportunity.
-            </Text>
-          </View>
-
-          <SectionCard title="What NumVault Does" icon="phone-android">
-            <Text style={styles.bodyText}>
-              NumVault gives customers separate phone numbers for different digital purposes — personal, business, platforms, services, and more. Pay as you go. No subscription. 2,300+ apps and services.{'\n\n'}
-              The core idea is separation of concern: one number for work, another for online platforms, another for sign-ups — without mixing everything into one personal number.
-            </Text>
-          </SectionCard>
-
-          <SectionCard title="Why Students Can Help" icon="lightbulb-outline">
-            <Text style={styles.bodyText}>
-              The demand NumVault addresses exists in every student network — freelancers, entrepreneurs, online workers, creators, small-business owners. These are people who genuinely need a private number.{'\n\n'}
-              Through this program you develop practical experience in customer acquisition, digital marketing, referral marketing, and SaaS business growth.
-            </Text>
-          </SectionCard>
-
-          <SectionCard title="The Opportunity" icon="emoji-events">
-            <HighlightRow icon="groups" label="76 customers in 30 days" sub="Qualification stage — unpaid" />
-            <HighlightRow icon="verified" label="Eligibility review" sub="Admin reviews your 76 customers" />
-            <HighlightRow icon="payments" label="Become a NumVault Lead" sub="₦50,000 per 38-customer cycle" />
-            <HighlightRow icon="calendar-today" label="Up to ₦100,000/month" sub="Maximum across 6 monthly windows" />
-          </SectionCard>
-
-          <SectionCard title="What Counts as a Customer" icon="check-circle-outline">
-            <Text style={styles.bodyText}>A referred customer counts when they:</Text>
-            <BulletRow text="Sign up through your referral code" check />
-            <BulletRow text="Purchase at least one phone number" check />
-            <BulletRow text="The number is successfully delivered" check />
-            <View style={styles.dividerLine} />
-            <Text style={[styles.bodyText, { marginTop: Spacing.sm }]}>Does NOT count:</Text>
-            <BulletRow text="Referral code entry without purchase" />
-            <BulletRow text="Signup alone" />
-            <BulletRow text="Wallet funding without a number purchase" />
-          </SectionCard>
-
-          <TouchableOpacity
-            style={styles.ctaBtn}
-            onPress={() => setScreen('enroll')}
-            activeOpacity={0.85}
+        <View style={{ flex: 1 }}>
+          {/* Horizontal pager — each step is its own scrollable page */}
+          <ScrollView
+            ref={landingScrollRef}
+            horizontal
+            pagingEnabled
+            scrollEnabled={false}
+            showsHorizontalScrollIndicator={false}
+            style={{ flex: 1 }}
           >
-            <MaterialIcons name="rocket-launch" size={18} color={Colors.black} />
-            <Text style={styles.ctaBtnText}>Enroll in the Program</Text>
-          </TouchableOpacity>
+            {LANDING_STEPS.map((step, i) => (
+              <ScrollView
+                key={i}
+                style={{ width: SCREEN_WIDTH }}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.landingPage}
+              >
+                {/* Step label + icon */}
+                <View style={styles.landingIconRow}>
+                  <View style={styles.landingIconWrap}>
+                    <MaterialIcons name={step.icon} size={32} color={Colors.primary} />
+                  </View>
+                  <Text style={styles.landingStepLabel}>{step.label}</Text>
+                </View>
 
-          <View style={{ height: 40 }} />
-        </ScrollView>
+                <Text style={styles.landingTitle}>{step.title}</Text>
+
+                {step.body ? (
+                  <Text style={styles.landingBody}>{step.body}</Text>
+                ) : null}
+
+                {step.highlights ? (
+                  <View style={styles.landingCard}>
+                    {step.highlights.map((h, hi) => (
+                      <View
+                        key={hi}
+                        style={[
+                          styles.highlightRow,
+                          hi === step.highlights!.length - 1 && { borderBottomWidth: 0 },
+                        ]}
+                      >
+                        <View style={styles.highlightIcon}>
+                          <MaterialIcons name={h.icon as any} size={18} color={Colors.primary} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.highlightLabel}>{h.label}</Text>
+                          <Text style={styles.highlightSub}>{h.sub}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                {step.bullets ? (
+                  <View style={styles.landingCard}>
+                    <Text style={[styles.landingBody, { marginBottom: Spacing.sm, fontWeight: FontWeight.semibold, color: Colors.text }]}>
+                      A customer counts when they:
+                    </Text>
+                    {step.bullets.map((b, bi) => (
+                      <View key={bi} style={styles.bulletRow}>
+                        <MaterialIcons
+                          name={b.check ? 'check' : 'close'}
+                          size={14}
+                          color={b.check ? Colors.success : Colors.error}
+                        />
+                        <Text style={styles.bulletText}>{b.text}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                <View style={{ height: 24 }} />
+              </ScrollView>
+            ))}
+          </ScrollView>
+
+          {/* Footer: dots + CTA */}
+          <View style={[styles.landingFooter, { paddingBottom: insets.bottom + 24 }]}>
+            <View style={styles.landingDots}>
+              {LANDING_STEPS.map((_, i) => (
+                <View
+                  key={i}
+                  style={[styles.landingDot, i === landingStep && styles.landingDotActive]}
+                />
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={styles.ctaBtn}
+              onPress={async () => {
+                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                if (landingStep < LANDING_STEPS.length - 1) {
+                  const next = landingStep + 1;
+                  landingScrollRef.current?.scrollTo({ x: next * SCREEN_WIDTH, animated: true });
+                  setLandingStep(next);
+                } else {
+                  setScreen('enroll');
+                }
+              }}
+              activeOpacity={0.85}
+            >
+              <MaterialIcons
+                name={landingStep < LANDING_STEPS.length - 1 ? 'arrow-forward' : 'rocket-launch'}
+                size={18}
+                color={Colors.black}
+              />
+              <Text style={styles.ctaBtnText}>
+                {landingStep < LANDING_STEPS.length - 1 ? 'Continue' : 'Enroll in the Program'}
+              </Text>
+            </TouchableOpacity>
+
+            {landingStep > 0 ? (
+              <TouchableOpacity
+                style={styles.backLink}
+                onPress={async () => {
+                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  const prev = landingStep - 1;
+                  landingScrollRef.current?.scrollTo({ x: prev * SCREEN_WIDTH, animated: true });
+                  setLandingStep(prev);
+                }}
+              >
+                <Text style={styles.backLinkText}>Back</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
       )}
 
       {/* ── ENROLL FORM ── */}
@@ -306,7 +422,10 @@ export default function AcquisitionProgramScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.backLink} onPress={() => setScreen('landing')}>
+            <TouchableOpacity
+              style={styles.backLink}
+              onPress={() => { setLandingStep(0); setScreen('landing'); }}
+            >
               <Text style={styles.backLinkText}>Back</Text>
             </TouchableOpacity>
 
@@ -318,7 +437,6 @@ export default function AcquisitionProgramScreen() {
       {/* ── QUALIFYING ── */}
       {screen === 'qualifying' && participant && (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-          {/* Status banner */}
           <View style={[styles.statusBanner, windowExpired && styles.statusBannerWarning]}>
             <MaterialIcons
               name={windowExpired ? 'timer-off' : 'schedule'}
@@ -332,7 +450,6 @@ export default function AcquisitionProgramScreen() {
             </Text>
           </View>
 
-          {/* Progress card */}
           <View style={styles.progressCard}>
             <Text style={styles.progressLabel}>Customer Acquisition Progress</Text>
             <View style={styles.progressNumbers}>
@@ -351,7 +468,6 @@ export default function AcquisitionProgramScreen() {
             </View>
           </View>
 
-          {/* Referral */}
           <ReferralCard
             code={participant.referral_code}
             copied={copiedCode}
@@ -359,15 +475,13 @@ export default function AcquisitionProgramScreen() {
             onShare={shareCode}
           />
 
-          {/* Re-enroll if window expired */}
-          {windowExpired && (
+          {windowExpired ? (
             <TouchableOpacity style={styles.reEnrollBtn} onPress={handleReEnroll} activeOpacity={0.85}>
               <MaterialIcons name="refresh" size={18} color={Colors.black} />
               <Text style={styles.reEnrollText}>Enroll Again (Reset 0/76)</Text>
             </TouchableOpacity>
-          )}
+          ) : null}
 
-          {/* Pitch library */}
           <PitchLibrarySection pitches={pitches} expanded={pitchExpanded} onToggle={setPitchExpanded} />
 
           <View style={{ height: 40 }} />
@@ -416,7 +530,7 @@ export default function AcquisitionProgramScreen() {
         </ScrollView>
       )}
 
-      {/* ── ELIGIBLE (not yet activated) ── */}
+      {/* ── ELIGIBLE ── */}
       {screen === 'eligible' && participant && (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
           <View style={styles.heroCard}>
@@ -460,7 +574,6 @@ export default function AcquisitionProgramScreen() {
       {/* ── ACTIVE LEAD ── */}
       {screen === 'active_lead' && participant && cycleProgress && (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-          {/* Status banner */}
           <View style={[styles.statusBanner, { borderColor: Colors.success }]}>
             <MaterialIcons name="star" size={16} color={Colors.success} />
             <Text style={[styles.statusBannerText, { color: Colors.success }]}>
@@ -468,33 +581,26 @@ export default function AcquisitionProgramScreen() {
             </Text>
           </View>
 
-          {/* Cycle 1 card */}
           <CycleCard
             cycleNum={1}
             count={cycleProgress.cycle1Count}
             complete={cycleProgress.cycle1Complete}
             payout={payouts.find(
-              (p) =>
-                p.cycle_number === 1 &&
-                p.monthly_window_start === cycleProgress.windowStart
+              (p) => p.cycle_number === 1 && p.monthly_window_start === cycleProgress.windowStart
             )}
           />
 
-          {/* Cycle 2 card — shown once cycle 1 is complete */}
-          {cycleProgress.cycle1Complete && (
+          {cycleProgress.cycle1Complete ? (
             <CycleCard
               cycleNum={2}
               count={cycleProgress.cycle2Count}
               complete={cycleProgress.cycle2Complete}
               payout={payouts.find(
-                (p) =>
-                  p.cycle_number === 2 &&
-                  p.monthly_window_start === cycleProgress.windowStart
+                (p) => p.cycle_number === 2 && p.monthly_window_start === cycleProgress.windowStart
               )}
             />
-          )}
+          ) : null}
 
-          {/* Referral */}
           <ReferralCard
             code={participant.referral_code}
             copied={copiedCode}
@@ -502,13 +608,16 @@ export default function AcquisitionProgramScreen() {
             onShare={shareCode}
           />
 
-          {/* Payout history */}
-          {payouts.length > 0 && (
+          {payouts.length > 0 ? (
             <View style={styles.payoutSection}>
               <Text style={styles.sectionHeader2}>Payout History</Text>
               {payouts.map((pout) => (
                 <View key={pout.id} style={styles.payoutRow}>
-                  <View style={[styles.payoutIcon, { backgroundColor: pout.status === 'sent' ? Colors.successMuted : pout.status === 'failed' ? Colors.errorMuted : Colors.primaryMuted }]}>
+                  <View style={[styles.payoutIcon, {
+                    backgroundColor: pout.status === 'sent'
+                      ? Colors.successMuted
+                      : pout.status === 'failed' ? Colors.errorMuted : Colors.primaryMuted,
+                  }]}>
                     <MaterialIcons
                       name={pout.status === 'sent' ? 'check-circle' : pout.status === 'failed' ? 'error' : 'pending'}
                       size={16}
@@ -533,9 +642,8 @@ export default function AcquisitionProgramScreen() {
                 </View>
               ))}
             </View>
-          )}
+          ) : null}
 
-          {/* Pitch library */}
           <PitchLibrarySection pitches={pitches} expanded={pitchExpanded} onToggle={setPitchExpanded} />
 
           <View style={{ height: 40 }} />
@@ -547,11 +655,7 @@ export default function AcquisitionProgramScreen() {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function SectionCard({
-  title, icon, children,
-}: {
-  title: string; icon: string; children: React.ReactNode;
-}) {
+function SectionCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
   return (
     <View style={styles.sectionCard}>
       <View style={styles.sectionCardHeader}>
@@ -590,13 +694,8 @@ function BulletRow({ text, check }: { text: string; check?: boolean }) {
   );
 }
 
-function ReferralCard({
-  code, copied, onCopy, onShare,
-}: {
-  code: string;
-  copied: boolean;
-  onCopy: () => void;
-  onShare: () => void;
+function ReferralCard({ code, copied, onCopy, onShare }: {
+  code: string; copied: boolean; onCopy: () => void; onShare: () => void;
 }) {
   return (
     <View style={styles.referralCard}>
@@ -622,13 +721,8 @@ function ReferralCard({
   );
 }
 
-function CycleCard({
-  cycleNum, count, complete, payout,
-}: {
-  cycleNum: 1 | 2;
-  count: number;
-  complete: boolean;
-  payout?: LeadPayout;
+function CycleCard({ cycleNum, count, complete, payout }: {
+  cycleNum: 1 | 2; count: number; complete: boolean; payout?: LeadPayout;
 }) {
   const progress = Math.min(count / 38, 1);
   return (
@@ -650,34 +744,32 @@ function CycleCard({
         <Text style={styles.cycleTarget}>38 Customers</Text>
       </View>
       <View style={styles.progressBarTrack}>
-        <View
-          style={[
-            styles.progressBarFill,
-            { width: `${progress * 100}%`, backgroundColor: complete ? Colors.success : Colors.primary },
-          ]}
-        />
+        <View style={[
+          styles.progressBarFill,
+          { width: `${progress * 100}%`, backgroundColor: complete ? Colors.success : Colors.primary },
+        ]} />
       </View>
       <View style={styles.cycleReward}>
         <MaterialIcons name="payments" size={14} color={Colors.primary} />
         <Text style={styles.cycleRewardText}>₦50,000 reward</Text>
-        {payout && (
-          <View style={[styles.payoutStatusBadge, { backgroundColor: payout.status === 'sent' ? Colors.successMuted : Colors.primaryMuted }]}>
-            <Text style={[styles.payoutStatusText, { color: payout.status === 'sent' ? Colors.success : Colors.primary }]}>
+        {payout ? (
+          <View style={[styles.payoutStatusBadge, {
+            backgroundColor: payout.status === 'sent' ? Colors.successMuted : Colors.primaryMuted,
+          }]}>
+            <Text style={[styles.payoutStatusText, {
+              color: payout.status === 'sent' ? Colors.success : Colors.primary,
+            }]}>
               {payout.status === 'sent' ? 'Paid' : payout.status === 'failed' ? 'Failed' : 'Pending'}
             </Text>
           </View>
-        )}
+        ) : null}
       </View>
     </View>
   );
 }
 
-function PitchLibrarySection({
-  pitches, expanded, onToggle,
-}: {
-  pitches: PitchItem[];
-  expanded: string | null;
-  onToggle: (id: string | null) => void;
+function PitchLibrarySection({ pitches, expanded, onToggle }: {
+  pitches: PitchItem[]; expanded: string | null; onToggle: (id: string | null) => void;
 }) {
   if (pitches.length === 0) return null;
   return (
@@ -704,7 +796,7 @@ function PitchLibrarySection({
               />
             </View>
             <Text style={styles.pitchHeadline}>{p.headline}</Text>
-            {open && <Text style={styles.pitchBody}>{p.body}</Text>}
+            {open ? <Text style={styles.pitchBody}>{p.body}</Text> : null}
           </TouchableOpacity>
         );
       })}
@@ -737,10 +829,79 @@ const styles = StyleSheet.create({
   headerTitle: { color: Colors.text, fontSize: FontSize.lg, fontWeight: FontWeight.bold },
   content: { padding: Spacing.lg, gap: Spacing.lg },
 
-  heroCard: {
+  // ── Landing pager ──────────────────────────────────────────────────────────
+  landingPage: {
+    width: SCREEN_WIDTH,
+    padding: Spacing.lg,
+    paddingTop: Spacing.xl,
+    gap: Spacing.lg,
+  },
+  landingIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  landingIconWrap: {
+    width: 56, height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.primaryMuted,
+    borderWidth: 1, borderColor: 'rgba(0,200,83,0.25)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  landingStepLabel: {
+    color: Colors.primary,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  landingTitle: {
+    color: Colors.text,
+    fontSize: FontSize.xxl,
+    fontWeight: FontWeight.bold,
+    lineHeight: 32,
+  },
+  landingBody: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.md,
+    lineHeight: 26,
+  },
+  landingCard: {
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    gap: Spacing.xs,
+  },
+  landingFooter: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    gap: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.surfaceBorder,
+    backgroundColor: Colors.background,
+  },
+  landingDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: Spacing.sm,
+  },
+  landingDot: {
+    width: 6, height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.surfaceBorder,
+  },
+  landingDotActive: {
+    width: 20,
+    backgroundColor: Colors.primary,
+  },
+
+  // ── Hero card (post-landing screens) ──────────────────────────────────────
+  heroCard: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1, borderColor: Colors.surfaceBorder,
     borderRadius: Radius.xl,
     padding: Spacing.xl,
     alignItems: 'center',
@@ -930,8 +1091,7 @@ const styles = StyleSheet.create({
   cycleSep: { color: Colors.textMuted, fontSize: 24 },
   cycleTarget: { color: Colors.text, fontSize: FontSize.md, fontWeight: FontWeight.semibold },
   cycleReward: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    marginTop: Spacing.xs,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xs,
   },
   cycleRewardText: { color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 },
   payoutStatusBadge: { borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 3 },
