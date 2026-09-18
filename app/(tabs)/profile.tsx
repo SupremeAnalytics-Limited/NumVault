@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
@@ -243,6 +244,27 @@ export default function ProfileScreen() {
           <Text style={styles.profileEmail}>{user?.email}</Text>
         </View>
 
+        {/* ── Acquisition Program Banner ── */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={styles.programBanner}
+            onPress={async () => {
+              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              router.push('/acquisition-program');
+            }}
+            activeOpacity={0.85}
+          >
+            <View style={styles.programBannerIcon}>
+              <MaterialIcons name="groups" size={22} color={Colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.programBannerTitle}>Acquisition Program for Students</Text>
+              <Text style={styles.programBannerSub}>Acquire customers · Qualify for paid Lead opportunity</Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={20} color={Colors.primary} />
+          </TouchableOpacity>
+        </View>
+
         {/* Menu items */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Account</Text>
@@ -326,6 +348,19 @@ export default function ProfileScreen() {
                     ? 'Sent'
                     : 'Send Transfer'}
                 </Text>
+              </TouchableOpacity>
+              {/* Admin Dashboard link */}
+              <TouchableOpacity
+                style={[styles.menuRow, { borderBottomWidth: 0 }]}
+                onPress={async () => {
+                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push('/admin');
+                }}
+                activeOpacity={0.7}
+              >
+                <MaterialIcons name="dashboard" size={18} color={Colors.warning} />
+                <Text style={[styles.menuLabel, { color: Colors.warning, flex: 1 }]}>Acquisition Admin Dashboard</Text>
+                <MaterialIcons name="chevron-right" size={18} color={Colors.warning} />
               </TouchableOpacity>
             </View>
 
@@ -773,6 +808,25 @@ const styles = StyleSheet.create({
   deleteConfirmText: { color: Colors.white, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
 
   // Admin panel styles
+  programBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+  },
+  programBannerIcon: {
+    width: 44, height: 44,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.primaryMuted,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  programBannerTitle: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+  programBannerSub: { color: Colors.textSecondary, fontSize: FontSize.xs, marginTop: 2 },
+
   adminCard: {
     backgroundColor: Colors.surface,
     borderWidth: 1,

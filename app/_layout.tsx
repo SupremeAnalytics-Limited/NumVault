@@ -122,6 +122,14 @@ function RootLayout() {
                   name="number-display"
                   options={{ headerShown: false }}
                 />
+                <Stack.Screen
+                  name="acquisition-program"
+                  options={{ headerShown: false }}
+                />
+                <Stack.Screen
+                  name="admin"
+                  options={{ headerShown: false }}
+                />
               </Stack>
             </OrderProvider>
           </WalletProvider>
