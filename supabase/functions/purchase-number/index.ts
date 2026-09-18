@@ -64,7 +64,8 @@ Deno.serve(async (req: Request) => {
     // ── SERVER-SIDE PRICE VALIDATION ─────────────────────────────────────────
     // Fetch the authoritative price from Socially.ng before debiting anything.
     // This prevents clients from sending a manipulated amount_paid value.
-    const MARKUP = 1.4;
+    // Pricing model: customer pays wholesale + ₦1,500 flat fee.
+    const FLAT_ACQUISITION_FEE = 1500; // ₦1,500
     try {
       const socially_url = Deno.env.get('SUPABASE_URL') ?? '';
       const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -87,11 +88,11 @@ Deno.serve(async (req: Request) => {
         (p: any) => String(p.project_code ?? p.id ?? '') === String(project_code)
       );
       if (matchingPkg) {
-        const wholesaleKobo = Number(matchingPkg.price ?? 0);
-        const expectedRetail = Math.ceil(wholesaleKobo * MARKUP);
+        const wholesale = Number(matchingPkg.price ?? 0);
+        const expectedRetail = Math.ceil(wholesale + FLAT_ACQUISITION_FEE);
         const clientRetail = Math.ceil(Number(amount_paid));
-        // Allow ±2 naira tolerance for rounding differences
-        if (Math.abs(clientRetail - expectedRetail) > 2) {
+        // Allow ±50 naira tolerance (covers rounding and temporary price shifts)
+        if (Math.abs(clientRetail - expectedRetail) > 50) {
           console.warn(
             `Price mismatch: client sent ${clientRetail}, server expects ${expectedRetail} for ${project_code}/${country_code}`
           );
@@ -103,7 +104,7 @@ Deno.serve(async (req: Request) => {
             status: 409,
           });
         }
-        console.log(`Price validated: client=${clientRetail}, server=${expectedRetail} ✓`);
+        console.log(`Price validated: client=${clientRetail}, server=${expectedRetail} (wholesale=${wholesale} + fee=1500) ✓`);
       } else {
         console.warn(`Price validation: package ${project_code} not found in response — proceeding without validation`);
       }

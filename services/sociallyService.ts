@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '@/template';
-import { MARKUP } from '@/constants/config';
+import { FLAT_ACQUISITION_FEE } from '@/constants/config';
 
 const supabase = getSupabaseClient();
 
@@ -242,7 +242,7 @@ export async function getPackages(providerCode: string, countryCode: string): Pr
         project_code: String(pkg.project_code ?? pkg.id ?? ''),
         project_name: String(pkg.project_name ?? pkg.name ?? pkg.title ?? ''),
         price: rawPrice,
-        displayPrice: rawPrice > 0 ? Math.ceil(rawPrice * MARKUP) : 0,
+        displayPrice: rawPrice > 0 ? Math.ceil(rawPrice + FLAT_ACQUISITION_FEE) : 0,
       };
     });
 

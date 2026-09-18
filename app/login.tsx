@@ -10,6 +10,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAuth, useAlert } from '@/template';
 import { waitForSession, setPasswordWithRetry } from '@/services/authHelpers';
+import { applyReferralCode } from '@/services/acquisitionService';
 import {
   trackSignupStarted, trackSignupOtpSent, trackSignupCompleted, trackSignupFailed,
   trackLoginStarted, trackLoginCompleted, trackLoginFailed,
@@ -26,6 +27,7 @@ export default function LoginScreen() {
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState('');
   const [showPass, setShowPass] = useState(false);
+  const [referralCode, setReferralCode] = useState('');
   // Forgot-password state
   const [forgotOtpSent, setForgotOtpSent] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -83,7 +85,7 @@ export default function LoginScreen() {
     }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    const { error: verifyError } = await verifyOTPAndLogin(email.trim().toLowerCase(), otp);
+    const { error: verifyError, user: newUser } = await verifyOTPAndLogin(email.trim().toLowerCase(), otp);
     if (verifyError) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       trackSignupFailed(verifyError);
@@ -109,7 +111,15 @@ export default function LoginScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
     const { data: { session } } = await (await import('@/template')).getSupabaseClient().auth.getSession();
-    if (session?.user?.id) trackSignupCompleted(session.user.id);
+    if (session?.user?.id) {
+      trackSignupCompleted(session.user.id);
+      // Apply referral code silently — failure must never block signup
+      if (referralCode.trim()) {
+        applyReferralCode(session.user.id, referralCode.trim()).catch((e) =>
+          console.warn('applyReferralCode failed (non-blocking):', e)
+        );
+      }
+    }
     router.replace('/(tabs)');
   };
 
@@ -345,6 +355,25 @@ export default function LoginScreen() {
                 >
                   <Text style={styles.forgotLinkText}>Forgot password?</Text>
                 </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Register: optional referral code */}
+            {mode === 'register' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Referral Code (Optional)</Text>
+                <View style={styles.inputRow}>
+                  <MaterialIcons name="group-add" size={18} color={Colors.textMuted} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    value={referralCode}
+                    onChangeText={(t) => setReferralCode(t.toUpperCase())}
+                    placeholder="e.g. NVJOHN4X7Y"
+                    placeholderTextColor={Colors.textMuted}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                  />
+                </View>
               </View>
             )}
 

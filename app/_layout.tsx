@@ -1,3 +1,4 @@
+
 // build-v7
 import * as Sentry from '@sentry/react-native';
 import { AlertProvider, AuthProvider } from '@/template';
@@ -126,10 +127,7 @@ function RootLayout() {
                   name="acquisition-program"
                   options={{ headerShown: false }}
                 />
-                <Stack.Screen
-                  name="admin"
-                  options={{ headerShown: false }}
-                />
+                <Stack.Screen name="admin" options={{ headerShown: false }} />
               </Stack>
             </OrderProvider>
           </WalletProvider>

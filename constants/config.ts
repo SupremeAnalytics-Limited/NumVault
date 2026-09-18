@@ -1,4 +1,8 @@
-export const MARKUP = 1.4; // 40% markup on all Socially.ng prices
+// Flat ₦1,500 acquisition contribution per qualifying direct number purchase.
+// Customer price = wholesale price + FLAT_ACQUISITION_FEE.
+// MARKUP is retained only for legacy server-side price validation in purchase-number.
+export const MARKUP = 1.4; // legacy — only used in purchase-number price guard
+export const FLAT_ACQUISITION_FEE = 1500; // ₦1,500 flat fee above wholesale
 
 export const PLATFORM_DESCRIPTIONS: Record<string, string> = {
   PayPal: "PayPal blocks Nigerian numbers from verifying accounts. A US or UK number gets you verified instantly so you can send, receive and hold dollars.",

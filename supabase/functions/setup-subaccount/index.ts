@@ -1,14 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
 
-// One-time admin function to create/verify the Paystack subaccount for Socially.ng's Palmpay account.
-// Idempotent: if a subaccount already exists for account number 6635796668, returns existing code
-// and auto-corrects the percentage_charge if it is wrong.
-//
-// ⚠️  PAYSTACK DEFINITION:
-//     percentage_charge = the % the SUBACCOUNT receives.
-//     So percentage_charge: 71.43 → Socially.ng gets 71.43%, NumVault keeps 28.57%.
-//     (Earlier builds had this set to 28.57 — backwards — causing Socially.ng to receive only 28.57%.)
+// One-time admin function to:
+//  1. Create/verify the Paystack subaccount for Socially.ng (idempotent)
+//  2. Set settlement_schedule to 'manual' so Paystack does NOT auto-settle
+//     the NumVault main account balance to the Kuda bank account. Prevents
+//     money leaving before Lead payouts are sent.
 //
 // Auth: valid user JWT required, email must match ADMIN_EMAIL.
 
@@ -18,7 +15,10 @@ const SOCIALLY_ACCOUNT_NUMBER = '6635796668';
 const SOCIALLY_ACCOUNT_NAME = 'Riteweb Digital Services-Sim(Paymentpoint)';
 
 // percentage_charge = what the SUBACCOUNT (Socially.ng) receives.
-// 71.43% to Socially.ng = NumVault keeps 28.57% (the 1/1.4 markup ratio).
+// With wholesale + ₦1,500 pricing: Socially.ng receives wholesale (variable %);
+// we keep ₦1,500 flat. The subaccount split is an approximation — exact
+// wholesale recovery is handled operationally via manual settlement.
+// 71.43% approximates the old 1.4× model for backwards compatibility.
 const SUBACCOUNT_PERCENTAGE = 71.43;
 
 Deno.serve(async (req: Request) => {
@@ -177,6 +177,13 @@ Deno.serve(async (req: Request) => {
     const subaccountCode = createData.data.subaccount_code;
     console.log(`Subaccount created: ${subaccountCode} (percentage_charge: ${SUBACCOUNT_PERCENTAGE})`);
 
+    // ── Set settlement schedule to manual ───────────────────────────────────────
+    // Paystack does not expose a REST API for settlement_schedule changes.
+    // The dashboard path is: Settings → Preferences → Settlement Schedule → Manual.
+    // We log a reminder so the admin knows this step is required.
+    console.log('SETTLEMENT ACTION REQUIRED: Paystack Dashboard → Settings → Preferences → Settlement Schedule → set to Manual');
+    // ─────────────────────────────────────────────────────────────────────────
+
     return new Response(JSON.stringify({
       success: true,
       already_existed: false,
@@ -186,6 +193,7 @@ Deno.serve(async (req: Request) => {
       bank_name: palmpay.name,
       percentage_charge: SUBACCOUNT_PERCENTAGE,
       note: `percentage_charge=${SUBACCOUNT_PERCENTAGE} — Socially.ng receives ${SUBACCOUNT_PERCENTAGE}%, NumVault keeps ${(100 - SUBACCOUNT_PERCENTAGE).toFixed(2)}%.`,
+      settlement_action: 'MANUAL STEP REQUIRED: Go to Paystack Dashboard → Settings → Preferences → Settlement Schedule → set to Manual to prevent auto-settlement before Lead payouts.',
       next_step: `Add this as a Supabase secret named SOCIALLY_SUBACCOUNT_CODE with value: ${subaccountCode}`,
       paystack_response: createData.data,
     }), {

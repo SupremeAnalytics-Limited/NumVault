@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, ActivityIndicator, Share, TextInput,
-  KeyboardAvoidingView, Platform, Dimensions,
+  KeyboardAvoidingView, Platform, Dimensions, Modal,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -19,11 +19,10 @@ import {
 } from '@/services/acquisitionService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
-type Screen = 'landing' | 'enroll' | 'qualifying' | 'pending_review' | 'eligible' | 'active_lead';
+type Screen = 'landing' | 'enroll' | 'qualifying' | 'pending_review' | 'eligible' | 'bank_onboarding' | 'active_lead';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// ── 3-step landing intro ──────────────────────────────────────────────────────
 const LANDING_STEPS = [
   {
     label: 'The Product',
@@ -77,21 +76,28 @@ export default function AcquisitionProgramScreen() {
   const [pitches, setPitches] = useState<PitchItem[]>([]);
   const [screen, setScreen] = useState<Screen>('landing');
 
-  // Landing step pager
   const [landingStep, setLandingStep] = useState(0);
   const landingScrollRef = useRef<ScrollView>(null);
 
-  // Enroll form
   const [enrollName, setEnrollName] = useState('');
   const [enrolling, setEnrolling] = useState(false);
 
-  // UI state
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankList, setBankList] = useState<{ name: string; code: string }[]>([]);
+  const [selectedBank, setSelectedBank] = useState<{ name: string; code: string } | null>(null);
+  const [showBankPicker, setShowBankPicker] = useState(false);
+  const [resolvedAccountName, setResolvedAccountName] = useState<string | null>(null);
+  const [resolvingAccount, setResolvingAccount] = useState(false);
+  const [savingBank, setSavingBank] = useState(false);
+
   const [pitchExpanded, setPitchExpanded] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
 
+  useEffect(() => { loadAll(); }, []);
+
   useEffect(() => {
-    loadAll();
-  }, []);
+    if (screen === 'bank_onboarding' && bankList.length === 0) loadBankList();
+  }, [screen]);
 
   const loadAll = async () => {
     try {
@@ -100,10 +106,7 @@ export default function AcquisitionProgramScreen() {
       setPitches(lib);
       if (p) {
         setParticipant(p);
-        const [refs, pays] = await Promise.all([
-          getMyReferredCustomers(p.id),
-          getMyPayouts(p.id),
-        ]);
+        const [refs, pays] = await Promise.all([getMyReferredCustomers(p.id), getMyPayouts(p.id)]);
         setReferred(refs);
         setPayouts(pays);
         setScreen(mapStatusToScreen(p));
@@ -119,22 +122,90 @@ export default function AcquisitionProgramScreen() {
 
   const mapStatusToScreen = (p: AcquisitionParticipant): Screen => {
     switch (p.status) {
-      case 'qualifying': {
-        if (p.qualification_customers_count >= 76) return 'pending_review';
-        return 'qualifying';
-      }
+      case 'qualifying':
+        return p.qualification_customers_count >= 76 ? 'pending_review' : 'qualifying';
       case 'eligible_not_joined': return 'eligible';
       case 'active_lead': return 'active_lead';
-      case 'inactive': return 'qualifying';
       default: return 'landing';
     }
   };
 
-  const handleEnroll = async () => {
-    if (!enrollName.trim()) {
-      showAlert('Name required', 'Please enter your full name to enroll.');
-      return;
+  const loadBankList = async () => {
+    try {
+      const supabase = (await import('@/template')).getSupabaseClient();
+      const res = await supabase.functions.invoke('create-transfer-recipient', {
+        body: { action: 'list_banks' },
+      });
+      if (res.data?.banks && Array.isArray(res.data.banks)) {
+        setBankList(res.data.banks.map((b: any) => ({ name: b.name, code: b.code })));
+      }
+    } catch (e) {
+      console.warn('Failed to load bank list:', e);
     }
+  };
+
+  const resolveAccount = async () => {
+    if (!selectedBank || bankAccountNumber.length < 10) return;
+    setResolvingAccount(true);
+    setResolvedAccountName(null);
+    try {
+      const supabase = (await import('@/template')).getSupabaseClient();
+      const res = await supabase.functions.invoke('create-transfer-recipient', {
+        body: { action: 'resolve', account_number: bankAccountNumber, bank_code: selectedBank.code },
+      });
+      if (res.data?.account_name) {
+        setResolvedAccountName(res.data.account_name);
+      } else {
+        showAlert('Account not found', 'Could not verify this account number. Please check the details.');
+      }
+    } catch (e) {
+      showAlert('Error', 'Could not connect to bank verification service.');
+    } finally {
+      setResolvingAccount(false);
+    }
+  };
+
+  const saveBankDetails = async () => {
+    if (!participant || !selectedBank || !resolvedAccountName) return;
+    setSavingBank(true);
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const supabase = (await import('@/template')).getSupabaseClient();
+
+      const recipientRes = await supabase.functions.invoke('create-transfer-recipient', {
+        body: {
+          action: 'create_recipient',
+          participant_id: participant.id,
+          account_number: bankAccountNumber,
+          bank_code: selectedBank.code,
+          bank_name: selectedBank.name,
+          account_name: resolvedAccountName,
+        },
+      });
+
+      const { error } = await supabase
+        .from('acquisition_participants')
+        .update({
+          bank_account_number: bankAccountNumber,
+          bank_code: selectedBank.code,
+          bank_name: selectedBank.name,
+          paystack_recipient_code: recipientRes.data?.recipient_code ?? null,
+        })
+        .eq('id', participant.id);
+
+      if (error) throw new Error(error.message);
+
+      showAlert('Bank Details Saved', 'Your bank account has been saved. The NumVault team will activate your Lead account.');
+      await loadAll();
+    } catch (e: any) {
+      showAlert('Error', e.message || 'Failed to save bank details.');
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
+  const handleEnroll = async () => {
+    if (!enrollName.trim()) { showAlert('Name required', 'Please enter your full name to enroll.'); return; }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setEnrolling(true);
     try {
@@ -152,26 +223,17 @@ export default function AcquisitionProgramScreen() {
 
   const handleReEnroll = async () => {
     if (!participant) return;
-    showAlert(
-      'Start a new 30-day attempt?',
-      'Your progress will reset to 0 / 76. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Re-enroll',
-          style: 'default',
-          onPress: async () => {
-            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            try {
-              await reEnrollInProgram(participant.id);
-              await loadAll();
-            } catch (e: any) {
-              showAlert('Error', e.message);
-            }
-          },
+    showAlert('Start a new 30-day attempt?', 'Your progress will reset to 0 / 76. This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Re-enroll', style: 'default',
+        onPress: async () => {
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          try { await reEnrollInProgram(participant.id); await loadAll(); }
+          catch (e: any) { showAlert('Error', e.message); }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const copyCode = async () => {
@@ -186,7 +248,7 @@ export default function AcquisitionProgramScreen() {
     if (!participant?.referral_code) return;
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Share.share({
-      message: `Sign up on NumVault and use my referral code: ${participant.referral_code}\n\nNumVault gives you private phone numbers for any app or service — pay as you go, no subscription. Download the app and get your first number.`,
+      message: `Sign up on NumVault and use my referral code: ${participant.referral_code}\n\nNumVault gives you private phone numbers for any app or service — pay as you go, no subscription.`,
       title: 'Join NumVault',
     });
   };
@@ -214,62 +276,37 @@ export default function AcquisitionProgramScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
           <MaterialIcons name="arrow-back" size={22} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Acquisition Program</Text>
         <View style={{ width: 36 }} />
       </View>
 
-      {/* ── LANDING — 3-step progressive intro ── */}
+      {/* ── LANDING ── */}
       {screen === 'landing' && (
         <View style={{ flex: 1 }}>
-          {/* Horizontal pager — each step is its own scrollable page */}
           <ScrollView
             ref={landingScrollRef}
-            horizontal
-            pagingEnabled
-            scrollEnabled={false}
+            horizontal pagingEnabled scrollEnabled={false}
             showsHorizontalScrollIndicator={false}
             style={{ flex: 1 }}
           >
             {LANDING_STEPS.map((step, i) => (
-              <ScrollView
-                key={i}
-                style={{ width: SCREEN_WIDTH }}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.landingPage}
-              >
-                {/* Step label + icon */}
+              <ScrollView key={i} style={{ width: SCREEN_WIDTH }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.landingPage}>
                 <View style={styles.landingIconRow}>
                   <View style={styles.landingIconWrap}>
                     <MaterialIcons name={step.icon} size={32} color={Colors.primary} />
                   </View>
                   <Text style={styles.landingStepLabel}>{step.label}</Text>
                 </View>
-
                 <Text style={styles.landingTitle}>{step.title}</Text>
-
-                {step.body ? (
-                  <Text style={styles.landingBody}>{step.body}</Text>
-                ) : null}
-
+                {step.body ? <Text style={styles.landingBody}>{step.body}</Text> : null}
                 {step.highlights ? (
                   <View style={styles.landingCard}>
                     {step.highlights.map((h, hi) => (
-                      <View
-                        key={hi}
-                        style={[
-                          styles.highlightRow,
-                          hi === step.highlights!.length - 1 && { borderBottomWidth: 0 },
-                        ]}
-                      >
+                      <View key={hi} style={[styles.highlightRow, hi === step.highlights!.length - 1 && { borderBottomWidth: 0 }]}>
                         <View style={styles.highlightIcon}>
                           <MaterialIcons name={h.icon as any} size={18} color={Colors.primary} />
                         </View>
@@ -281,7 +318,6 @@ export default function AcquisitionProgramScreen() {
                     ))}
                   </View>
                 ) : null}
-
                 {step.bullets ? (
                   <View style={styles.landingCard}>
                     <Text style={[styles.landingBody, { marginBottom: Spacing.sm, fontWeight: FontWeight.semibold, color: Colors.text }]}>
@@ -289,33 +325,23 @@ export default function AcquisitionProgramScreen() {
                     </Text>
                     {step.bullets.map((b, bi) => (
                       <View key={bi} style={styles.bulletRow}>
-                        <MaterialIcons
-                          name={b.check ? 'check' : 'close'}
-                          size={14}
-                          color={b.check ? Colors.success : Colors.error}
-                        />
+                        <MaterialIcons name={b.check ? 'check' : 'close'} size={14} color={b.check ? Colors.success : Colors.error} />
                         <Text style={styles.bulletText}>{b.text}</Text>
                       </View>
                     ))}
                   </View>
                 ) : null}
-
                 <View style={{ height: 24 }} />
               </ScrollView>
             ))}
           </ScrollView>
 
-          {/* Footer: dots + CTA */}
           <View style={[styles.landingFooter, { paddingBottom: insets.bottom + 24 }]}>
             <View style={styles.landingDots}>
               {LANDING_STEPS.map((_, i) => (
-                <View
-                  key={i}
-                  style={[styles.landingDot, i === landingStep && styles.landingDotActive]}
-                />
+                <View key={i} style={[styles.landingDot, i === landingStep && styles.landingDotActive]} />
               ))}
             </View>
-
             <TouchableOpacity
               style={styles.ctaBtn}
               onPress={async () => {
@@ -330,16 +356,11 @@ export default function AcquisitionProgramScreen() {
               }}
               activeOpacity={0.85}
             >
-              <MaterialIcons
-                name={landingStep < LANDING_STEPS.length - 1 ? 'arrow-forward' : 'rocket-launch'}
-                size={18}
-                color={Colors.black}
-              />
+              <MaterialIcons name={landingStep < LANDING_STEPS.length - 1 ? 'arrow-forward' : 'rocket-launch'} size={18} color={Colors.black} />
               <Text style={styles.ctaBtnText}>
                 {landingStep < LANDING_STEPS.length - 1 ? 'Continue' : 'Enroll in the Program'}
               </Text>
             </TouchableOpacity>
-
             {landingStep > 0 ? (
               <TouchableOpacity
                 style={styles.backLink}
@@ -357,12 +378,9 @@ export default function AcquisitionProgramScreen() {
         </View>
       )}
 
-      {/* ── ENROLL FORM ── */}
+      {/* ── ENROLL ── */}
       {screen === 'enroll' && (
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             <View style={styles.heroCard}>
               <View style={styles.heroIcon}>
@@ -385,9 +403,7 @@ export default function AcquisitionProgramScreen() {
                 autoCapitalize="words"
                 returnKeyType="done"
               />
-              <Text style={styles.formHint}>
-                This name will appear on your participant record and payout documents.
-              </Text>
+              <Text style={styles.formHint}>This name appears on your participant record and payout documents.</Text>
             </View>
 
             <View style={styles.ruleCard}>
@@ -412,9 +428,7 @@ export default function AcquisitionProgramScreen() {
               disabled={!enrollName.trim() || enrolling}
               activeOpacity={0.85}
             >
-              {enrolling ? (
-                <ActivityIndicator color={Colors.black} />
-              ) : (
+              {enrolling ? <ActivityIndicator color={Colors.black} /> : (
                 <>
                   <MaterialIcons name="check-circle" size={18} color={Colors.black} />
                   <Text style={styles.ctaBtnText}>Start My 30-Day Qualification</Text>
@@ -422,13 +436,9 @@ export default function AcquisitionProgramScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.backLink}
-              onPress={() => { setLandingStep(0); setScreen('landing'); }}
-            >
+            <TouchableOpacity style={styles.backLink} onPress={() => { setLandingStep(0); setScreen('landing'); }}>
               <Text style={styles.backLinkText}>Back</Text>
             </TouchableOpacity>
-
             <View style={{ height: 40 }} />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -438,11 +448,7 @@ export default function AcquisitionProgramScreen() {
       {screen === 'qualifying' && participant && (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
           <View style={[styles.statusBanner, windowExpired && styles.statusBannerWarning]}>
-            <MaterialIcons
-              name={windowExpired ? 'timer-off' : 'schedule'}
-              size={16}
-              color={windowExpired ? Colors.warning : Colors.primary}
-            />
+            <MaterialIcons name={windowExpired ? 'timer-off' : 'schedule'} size={16} color={windowExpired ? Colors.warning : Colors.primary} />
             <Text style={[styles.statusBannerText, windowExpired && { color: Colors.warning }]}>
               {windowExpired
                 ? 'Your 30-day window has expired — enroll again to start a new attempt.'
@@ -462,18 +468,11 @@ export default function AcquisitionProgramScreen() {
             </View>
             <View style={styles.progressMeta}>
               <Text style={styles.progressMetaText}>{76 - qualCount} customers remaining</Text>
-              <Text style={styles.progressMetaText}>
-                {windowExpired ? 'Window expired' : `${daysLeft}d left`}
-              </Text>
+              <Text style={styles.progressMetaText}>{windowExpired ? 'Window expired' : `${daysLeft}d left`}</Text>
             </View>
           </View>
 
-          <ReferralCard
-            code={participant.referral_code}
-            copied={copiedCode}
-            onCopy={copyCode}
-            onShare={shareCode}
-          />
+          <ReferralCard code={participant.referral_code} copied={copiedCode} onCopy={copyCode} onShare={shareCode} />
 
           {windowExpired ? (
             <TouchableOpacity style={styles.reEnrollBtn} onPress={handleReEnroll} activeOpacity={0.85}>
@@ -483,7 +482,6 @@ export default function AcquisitionProgramScreen() {
           ) : null}
 
           <PitchLibrarySection pitches={pitches} expanded={pitchExpanded} onToggle={setPitchExpanded} />
-
           <View style={{ height: 40 }} />
         </ScrollView>
       )}
@@ -513,19 +511,13 @@ export default function AcquisitionProgramScreen() {
             </View>
           </View>
 
-          <ReferralCard
-            code={participant.referral_code}
-            copied={copiedCode}
-            onCopy={copyCode}
-            onShare={shareCode}
-          />
+          <ReferralCard code={participant.referral_code} copied={copiedCode} onCopy={copyCode} onShare={shareCode} />
 
           <SectionCard title="What Happens Next" icon="schedule">
             <HighlightRow icon="manage-search" label="Admin reviews your 76 customers" sub="Checking for distinct accounts and genuine purchases" />
             <HighlightRow icon="check-circle" label="Approval → Paid Lead invitation" sub="You will be notified and asked to complete onboarding" />
             <HighlightRow icon="block" label="Rejection → Frozen at 76/76" sub="You can remain in review/appeal until resolved" />
           </SectionCard>
-
           <View style={{ height: 40 }} />
         </ScrollView>
       )}
@@ -539,7 +531,7 @@ export default function AcquisitionProgramScreen() {
             </View>
             <Text style={styles.heroTitle}>Eligibility Approved!</Text>
             <Text style={styles.heroSub}>
-              Congratulations — you have qualified for the paid NumVault Lead opportunity. Complete the onboarding below to become an active NumVault Lead.
+              Congratulations — you qualified for the paid NumVault Lead opportunity. Set up your bank account to receive payouts.
             </Text>
           </View>
 
@@ -549,26 +541,123 @@ export default function AcquisitionProgramScreen() {
             <HighlightRow icon="event-available" label="6 monthly windows" sub="₦600,000 maximum total over the program" />
           </SectionCard>
 
-          <View style={styles.onboardingCard}>
-            <Text style={styles.onboardingTitle}>Next Step: Bank Onboarding</Text>
-            <Text style={styles.onboardingText}>
-              Contact the NumVault team to provide your bank account details and complete the Lead onboarding process. Your payout account is required before your first paid cycle can begin.
-            </Text>
-            <TouchableOpacity
-              style={styles.ctaBtn}
-              onPress={() => {
-                const { Linking } = require('react-native');
-                Linking.openURL('https://ig.me/m/num.vault');
-              }}
-              activeOpacity={0.85}
-            >
-              <MaterialIcons name="support-agent" size={18} color={Colors.black} />
-              <Text style={styles.ctaBtnText}>Contact NumVault Team</Text>
-            </TouchableOpacity>
-          </View>
-
+          <TouchableOpacity style={styles.ctaBtn} onPress={() => setScreen('bank_onboarding')} activeOpacity={0.85}>
+            <MaterialIcons name="account-balance" size={18} color={Colors.black} />
+            <Text style={styles.ctaBtnText}>Set Up Bank Account</Text>
+          </TouchableOpacity>
           <View style={{ height: 40 }} />
         </ScrollView>
+      )}
+
+      {/* ── BANK ONBOARDING ── */}
+      {screen === 'bank_onboarding' && participant && (
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+            <View style={styles.heroCard}>
+              <View style={[styles.heroIcon, { backgroundColor: Colors.primaryMuted }]}>
+                <MaterialIcons name="account-balance" size={36} color={Colors.primary} />
+              </View>
+              <Text style={styles.heroTitle}>Bank Account Setup</Text>
+              <Text style={styles.heroSub}>This account will receive your Lead payouts of ₦50,000 per completed cycle.</Text>
+            </View>
+
+            <View style={styles.formCard}>
+              <Text style={styles.formLabel}>Account Number</Text>
+              <TextInput
+                style={styles.formInput}
+                value={bankAccountNumber}
+                onChangeText={(t) => { setBankAccountNumber(t.replace(/\D/g, '').slice(0, 10)); setResolvedAccountName(null); }}
+                placeholder="10-digit account number"
+                placeholderTextColor={Colors.textMuted}
+                keyboardType="number-pad"
+                maxLength={10}
+              />
+
+              <Text style={[styles.formLabel, { marginTop: Spacing.md }]}>Bank</Text>
+              <TouchableOpacity style={[styles.formInput, { justifyContent: 'center' }]} onPress={() => setShowBankPicker(true)} activeOpacity={0.8}>
+                <Text style={{ color: selectedBank ? Colors.text : Colors.textMuted, fontSize: FontSize.md }}>
+                  {selectedBank ? selectedBank.name : 'Select your bank'}
+                </Text>
+              </TouchableOpacity>
+
+              {bankAccountNumber.length === 10 && selectedBank ? (
+                <TouchableOpacity
+                  style={[styles.ctaBtn, { marginTop: Spacing.md }, resolvingAccount && styles.ctaBtnDisabled]}
+                  onPress={resolveAccount}
+                  disabled={resolvingAccount}
+                  activeOpacity={0.85}
+                >
+                  {resolvingAccount ? <ActivityIndicator color={Colors.black} /> : (
+                    <>
+                      <MaterialIcons name="verified-user" size={18} color={Colors.black} />
+                      <Text style={styles.ctaBtnText}>Verify Account</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              ) : null}
+
+              {resolvedAccountName ? (
+                <View style={[styles.statusBanner, { marginTop: Spacing.md }]}>
+                  <MaterialIcons name="check-circle" size={16} color={Colors.primary} />
+                  <Text style={styles.statusBannerText}>{resolvedAccountName}</Text>
+                </View>
+              ) : null}
+
+              <Text style={styles.formHint}>Must be in your name. Payouts are transferred directly to this account.</Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.ctaBtn, (!resolvedAccountName || savingBank) && styles.ctaBtnDisabled]}
+              onPress={saveBankDetails}
+              disabled={!resolvedAccountName || savingBank}
+              activeOpacity={0.85}
+            >
+              {savingBank ? <ActivityIndicator color={Colors.black} /> : (
+                <>
+                  <MaterialIcons name="save" size={18} color={Colors.black} />
+                  <Text style={styles.ctaBtnText}>Save Bank Details</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.backLink} onPress={() => setScreen('eligible')}>
+              <Text style={styles.backLinkText}>Back</Text>
+            </TouchableOpacity>
+            <View style={{ height: 40 }} />
+          </ScrollView>
+
+          <Modal visible={showBankPicker} animationType="slide" onRequestClose={() => setShowBankPicker(false)}>
+            <View style={[styles.container, { paddingTop: insets.top }]}>
+              <View style={styles.header}>
+                <TouchableOpacity style={styles.backBtn} onPress={() => setShowBankPicker(false)} activeOpacity={0.7}>
+                  <MaterialIcons name="close" size={22} color={Colors.text} />
+                </TouchableOpacity>
+                <Text style={styles.headerTitle}>Select Bank</Text>
+                <View style={{ width: 36 }} />
+              </View>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {bankList.length === 0 ? (
+                  <View style={[styles.center, { padding: Spacing.xl }]}>
+                    <ActivityIndicator color={Colors.primary} />
+                    <Text style={[styles.formHint, { marginTop: Spacing.sm }]}>Loading banks...</Text>
+                  </View>
+                ) : (
+                  bankList.map((bank) => (
+                    <TouchableOpacity
+                      key={bank.code}
+                      style={[styles.bankRow, selectedBank?.code === bank.code && styles.bankRowSelected]}
+                      onPress={() => { setSelectedBank(bank); setResolvedAccountName(null); setShowBankPicker(false); }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.bankName, selectedBank?.code === bank.code && { color: Colors.primary }]}>{bank.name}</Text>
+                      {selectedBank?.code === bank.code ? <MaterialIcons name="check" size={16} color={Colors.primary} /> : null}
+                    </TouchableOpacity>
+                  ))
+                )}
+              </ScrollView>
+            </View>
+          </Modal>
+        </KeyboardAvoidingView>
       )}
 
       {/* ── ACTIVE LEAD ── */}
@@ -582,42 +671,24 @@ export default function AcquisitionProgramScreen() {
           </View>
 
           <CycleCard
-            cycleNum={1}
-            count={cycleProgress.cycle1Count}
-            complete={cycleProgress.cycle1Complete}
-            payout={payouts.find(
-              (p) => p.cycle_number === 1 && p.monthly_window_start === cycleProgress.windowStart
-            )}
+            cycleNum={1} count={cycleProgress.cycle1Count} complete={cycleProgress.cycle1Complete}
+            payout={payouts.find((p) => p.cycle_number === 1 && p.monthly_window_start === cycleProgress.windowStart)}
           />
-
           {cycleProgress.cycle1Complete ? (
             <CycleCard
-              cycleNum={2}
-              count={cycleProgress.cycle2Count}
-              complete={cycleProgress.cycle2Complete}
-              payout={payouts.find(
-                (p) => p.cycle_number === 2 && p.monthly_window_start === cycleProgress.windowStart
-              )}
+              cycleNum={2} count={cycleProgress.cycle2Count} complete={cycleProgress.cycle2Complete}
+              payout={payouts.find((p) => p.cycle_number === 2 && p.monthly_window_start === cycleProgress.windowStart)}
             />
           ) : null}
 
-          <ReferralCard
-            code={participant.referral_code}
-            copied={copiedCode}
-            onCopy={copyCode}
-            onShare={shareCode}
-          />
+          <ReferralCard code={participant.referral_code} copied={copiedCode} onCopy={copyCode} onShare={shareCode} />
 
           {payouts.length > 0 ? (
             <View style={styles.payoutSection}>
               <Text style={styles.sectionHeader2}>Payout History</Text>
               {payouts.map((pout) => (
                 <View key={pout.id} style={styles.payoutRow}>
-                  <View style={[styles.payoutIcon, {
-                    backgroundColor: pout.status === 'sent'
-                      ? Colors.successMuted
-                      : pout.status === 'failed' ? Colors.errorMuted : Colors.primaryMuted,
-                  }]}>
+                  <View style={[styles.payoutIcon, { backgroundColor: pout.status === 'sent' ? Colors.successMuted : pout.status === 'failed' ? Colors.errorMuted : Colors.primaryMuted }]}>
                     <MaterialIcons
                       name={pout.status === 'sent' ? 'check-circle' : pout.status === 'failed' ? 'error' : 'pending'}
                       size={16}
@@ -625,15 +696,9 @@ export default function AcquisitionProgramScreen() {
                     />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.payoutLabel}>
-                      Cycle {pout.cycle_number} · {getMonthWindowLabel(pout.monthly_window_start)}
-                    </Text>
+                    <Text style={styles.payoutLabel}>Cycle {pout.cycle_number} · {getMonthWindowLabel(pout.monthly_window_start)}</Text>
                     <Text style={styles.payoutMeta}>
-                      {pout.status === 'sent'
-                        ? `Sent ${new Date(pout.sent_at!).toLocaleDateString()}`
-                        : pout.status === 'failed'
-                        ? pout.failure_reason || 'Transfer failed'
-                        : 'Pending transfer'}
+                      {pout.status === 'sent' ? `Sent ${new Date(pout.sent_at!).toLocaleDateString()}` : pout.status === 'failed' ? (pout.failure_reason || 'Transfer failed') : 'Pending transfer'}
                     </Text>
                   </View>
                   <Text style={[styles.payoutAmount, { color: pout.status === 'sent' ? Colors.success : Colors.text }]}>
@@ -645,7 +710,6 @@ export default function AcquisitionProgramScreen() {
           ) : null}
 
           <PitchLibrarySection pitches={pitches} expanded={pitchExpanded} onToggle={setPitchExpanded} />
-
           <View style={{ height: 40 }} />
         </ScrollView>
       )}
@@ -653,7 +717,7 @@ export default function AcquisitionProgramScreen() {
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Sub-components ─────────────────────────────────────────────────────────────
 
 function SectionCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
   return (
@@ -681,38 +745,17 @@ function HighlightRow({ icon, label, sub }: { icon: string; label: string; sub: 
   );
 }
 
-function BulletRow({ text, check }: { text: string; check?: boolean }) {
-  return (
-    <View style={styles.bulletRow}>
-      <MaterialIcons
-        name={check ? 'check' : 'close'}
-        size={14}
-        color={check ? Colors.success : Colors.error}
-      />
-      <Text style={styles.bulletText}>{text}</Text>
-    </View>
-  );
-}
-
-function ReferralCard({ code, copied, onCopy, onShare }: {
-  code: string; copied: boolean; onCopy: () => void; onShare: () => void;
-}) {
+function ReferralCard({ code, copied, onCopy, onShare }: { code: string; copied: boolean; onCopy: () => void; onShare: () => void }) {
   return (
     <View style={styles.referralCard}>
       <Text style={styles.referralTitle}>Your Referral Code</Text>
       <View style={styles.referralCodeRow}>
         <Text style={styles.referralCode}>{code}</Text>
         <TouchableOpacity onPress={onCopy} style={styles.copyBtn} activeOpacity={0.7}>
-          <MaterialIcons
-            name={copied ? 'check' : 'content-copy'}
-            size={18}
-            color={copied ? Colors.success : Colors.primary}
-          />
+          <MaterialIcons name={copied ? 'check' : 'content-copy'} size={18} color={copied ? Colors.success : Colors.primary} />
         </TouchableOpacity>
       </View>
-      <Text style={styles.referralHint}>
-        Ask customers to enter this code when they sign up on NumVault.
-      </Text>
+      <Text style={styles.referralHint}>Ask customers to enter this code when they sign up on NumVault.</Text>
       <TouchableOpacity style={styles.shareBtn} onPress={onShare} activeOpacity={0.85}>
         <MaterialIcons name="share" size={16} color={Colors.black} />
         <Text style={styles.shareBtnText}>Share Referral Code</Text>
@@ -721,9 +764,7 @@ function ReferralCard({ code, copied, onCopy, onShare }: {
   );
 }
 
-function CycleCard({ cycleNum, count, complete, payout }: {
-  cycleNum: 1 | 2; count: number; complete: boolean; payout?: LeadPayout;
-}) {
+function CycleCard({ cycleNum, count, complete, payout }: { cycleNum: 1 | 2; count: number; complete: boolean; payout?: LeadPayout }) {
   const progress = Math.min(count / 38, 1);
   return (
     <View style={[styles.cycleCard, complete && styles.cycleCardComplete]}>
@@ -734,9 +775,7 @@ function CycleCard({ cycleNum, count, complete, payout }: {
             <MaterialIcons name="check-circle" size={12} color={Colors.success} />
             <Text style={styles.cycleCompleteBadgeText}>Complete</Text>
           </View>
-        ) : (
-          <Text style={styles.cycleActiveText}>In Progress</Text>
-        )}
+        ) : <Text style={styles.cycleActiveText}>In Progress</Text>}
       </View>
       <View style={styles.cycleNumbers}>
         <Text style={styles.cycleCurrent}>{count}</Text>
@@ -744,21 +783,14 @@ function CycleCard({ cycleNum, count, complete, payout }: {
         <Text style={styles.cycleTarget}>38 Customers</Text>
       </View>
       <View style={styles.progressBarTrack}>
-        <View style={[
-          styles.progressBarFill,
-          { width: `${progress * 100}%`, backgroundColor: complete ? Colors.success : Colors.primary },
-        ]} />
+        <View style={[styles.progressBarFill, { width: `${progress * 100}%`, backgroundColor: complete ? Colors.success : Colors.primary }]} />
       </View>
       <View style={styles.cycleReward}>
         <MaterialIcons name="payments" size={14} color={Colors.primary} />
         <Text style={styles.cycleRewardText}>₦50,000 reward</Text>
         {payout ? (
-          <View style={[styles.payoutStatusBadge, {
-            backgroundColor: payout.status === 'sent' ? Colors.successMuted : Colors.primaryMuted,
-          }]}>
-            <Text style={[styles.payoutStatusText, {
-              color: payout.status === 'sent' ? Colors.success : Colors.primary,
-            }]}>
+          <View style={[styles.payoutStatusBadge, { backgroundColor: payout.status === 'sent' ? Colors.successMuted : Colors.primaryMuted }]}>
+            <Text style={[styles.payoutStatusText, { color: payout.status === 'sent' ? Colors.success : Colors.primary }]}>
               {payout.status === 'sent' ? 'Paid' : payout.status === 'failed' ? 'Failed' : 'Pending'}
             </Text>
           </View>
@@ -768,9 +800,7 @@ function CycleCard({ cycleNum, count, complete, payout }: {
   );
 }
 
-function PitchLibrarySection({ pitches, expanded, onToggle }: {
-  pitches: PitchItem[]; expanded: string | null; onToggle: (id: string | null) => void;
-}) {
+function PitchLibrarySection({ pitches, expanded, onToggle }: { pitches: PitchItem[]; expanded: string | null; onToggle: (id: string | null) => void }) {
   if (pitches.length === 0) return null;
   return (
     <View style={styles.pitchSection}>
@@ -779,21 +809,10 @@ function PitchLibrarySection({ pitches, expanded, onToggle }: {
       {pitches.map((p) => {
         const open = expanded === p.id;
         return (
-          <TouchableOpacity
-            key={p.id}
-            style={[styles.pitchCard, open && styles.pitchCardOpen]}
-            onPress={() => onToggle(open ? null : p.id)}
-            activeOpacity={0.8}
-          >
+          <TouchableOpacity key={p.id} style={[styles.pitchCard, open && styles.pitchCardOpen]} onPress={() => onToggle(open ? null : p.id)} activeOpacity={0.8}>
             <View style={styles.pitchCardHeader}>
-              <View style={styles.pitchAudienceBadge}>
-                <Text style={styles.pitchAudience}>{p.audience}</Text>
-              </View>
-              <MaterialIcons
-                name={open ? 'expand-less' : 'expand-more'}
-                size={20}
-                color={Colors.textSecondary}
-              />
+              <View style={styles.pitchAudienceBadge}><Text style={styles.pitchAudience}>{p.audience}</Text></View>
+              <MaterialIcons name={open ? 'expand-less' : 'expand-more'} size={20} color={Colors.textSecondary} />
             </View>
             <Text style={styles.pitchHeadline}>{p.headline}</Text>
             {open ? <Text style={styles.pitchBody}>{p.body}</Text> : null}
@@ -805,184 +824,59 @@ function PitchLibrarySection({ pitches, expanded, onToggle }: {
 }
 
 function getMonthWindowLabel(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' });
+  return new Date(dateStr).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' });
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
+// ── Styles ─────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   center: { alignItems: 'center', justifyContent: 'center' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-  },
-  backBtn: {
-    width: 36, height: 36, borderRadius: Radius.md,
-    backgroundColor: Colors.surface,
-    alignItems: 'center', justifyContent: 'center',
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md },
+  backBtn: { width: 36, height: 36, borderRadius: Radius.md, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: Colors.text, fontSize: FontSize.lg, fontWeight: FontWeight.bold },
   content: { padding: Spacing.lg, gap: Spacing.lg },
 
-  // ── Landing pager ──────────────────────────────────────────────────────────
-  landingPage: {
-    width: SCREEN_WIDTH,
-    padding: Spacing.lg,
-    paddingTop: Spacing.xl,
-    gap: Spacing.lg,
-  },
-  landingIconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  landingIconWrap: {
-    width: 56, height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.primaryMuted,
-    borderWidth: 1, borderColor: 'rgba(0,200,83,0.25)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  landingStepLabel: {
-    color: Colors.primary,
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.bold,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  landingTitle: {
-    color: Colors.text,
-    fontSize: FontSize.xxl,
-    fontWeight: FontWeight.bold,
-    lineHeight: 32,
-  },
-  landingBody: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.md,
-    lineHeight: 26,
-  },
-  landingCard: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    gap: Spacing.xs,
-  },
-  landingFooter: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
-    gap: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.surfaceBorder,
-    backgroundColor: Colors.background,
-  },
-  landingDots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-    marginBottom: Spacing.sm,
-  },
-  landingDot: {
-    width: 6, height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.surfaceBorder,
-  },
-  landingDotActive: {
-    width: 20,
-    backgroundColor: Colors.primary,
-  },
+  landingPage: { width: SCREEN_WIDTH, padding: Spacing.lg, paddingTop: Spacing.xl, gap: Spacing.lg },
+  landingIconRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  landingIconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.primaryMuted, borderWidth: 1, borderColor: 'rgba(0,200,83,0.25)', alignItems: 'center', justifyContent: 'center' },
+  landingStepLabel: { color: Colors.primary, fontSize: FontSize.sm, fontWeight: FontWeight.bold, letterSpacing: 1.2, textTransform: 'uppercase' },
+  landingTitle: { color: Colors.text, fontSize: FontSize.xxl, fontWeight: FontWeight.bold, lineHeight: 32 },
+  landingBody: { color: Colors.textSecondary, fontSize: FontSize.md, lineHeight: 26 },
+  landingCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, padding: Spacing.md, gap: Spacing.xs },
+  landingFooter: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, gap: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.surfaceBorder, backgroundColor: Colors.background },
+  landingDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginBottom: Spacing.sm },
+  landingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.surfaceBorder },
+  landingDotActive: { width: 20, backgroundColor: Colors.primary },
 
-  // ── Hero card (post-landing screens) ──────────────────────────────────────
-  heroCard: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1, borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.xl,
-    padding: Spacing.xl,
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  heroIcon: {
-    width: 72, height: 72,
-    borderRadius: 36,
-    backgroundColor: Colors.primaryMuted,
-    borderWidth: 1, borderColor: 'rgba(0,200,83,0.25)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  heroTitle: {
-    color: Colors.text, fontSize: FontSize.xl, fontWeight: FontWeight.bold,
-    textAlign: 'center', lineHeight: 28,
-  },
-  heroSub: {
-    color: Colors.textSecondary, fontSize: FontSize.sm,
-    textAlign: 'center', lineHeight: 22,
-  },
+  heroCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.xl, padding: Spacing.xl, alignItems: 'center', gap: Spacing.md },
+  heroIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.primaryMuted, borderWidth: 1, borderColor: 'rgba(0,200,83,0.25)', alignItems: 'center', justifyContent: 'center' },
+  heroTitle: { color: Colors.text, fontSize: FontSize.xl, fontWeight: FontWeight.bold, textAlign: 'center', lineHeight: 28 },
+  heroSub: { color: Colors.textSecondary, fontSize: FontSize.sm, textAlign: 'center', lineHeight: 22 },
 
-  sectionCard: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1, borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.lg, overflow: 'hidden',
-  },
-  sectionCardHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
-    borderBottomWidth: 1, borderBottomColor: Colors.surfaceBorder,
-    backgroundColor: Colors.surfaceElevated,
-  },
+  sectionCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, overflow: 'hidden' },
+  sectionCardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.surfaceBorder, backgroundColor: Colors.surfaceElevated },
   sectionCardTitle: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
   sectionCardBody: { padding: Spacing.lg, gap: Spacing.sm },
 
-  bodyText: { color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 22 },
-
-  highlightRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderBottomWidth: 1, borderBottomColor: Colors.surfaceBorder,
-  },
-  highlightIcon: {
-    width: 36, height: 36, borderRadius: Radius.sm,
-    backgroundColor: Colors.primaryMuted,
-    alignItems: 'center', justifyContent: 'center',
-    flexShrink: 0,
-  },
+  highlightRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.surfaceBorder },
+  highlightIcon: { width: 36, height: 36, borderRadius: Radius.sm, backgroundColor: Colors.primaryMuted, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   highlightLabel: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
   highlightSub: { color: Colors.textSecondary, fontSize: FontSize.xs, marginTop: 2 },
 
-  bulletRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,
-    paddingVertical: 4,
-  },
+  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, paddingVertical: 4 },
   bulletText: { flex: 1, color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 20 },
-  dividerLine: { height: 1, backgroundColor: Colors.surfaceBorder, marginVertical: Spacing.sm },
 
-  ctaBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.primary, borderRadius: Radius.md, height: 54,
-  },
+  ctaBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, backgroundColor: Colors.primary, borderRadius: Radius.md, height: 54 },
   ctaBtnDisabled: { opacity: 0.4 },
   ctaBtnText: { color: Colors.black, fontSize: FontSize.md, fontWeight: FontWeight.bold },
 
-  formCard: {
-    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.sm,
-  },
+  formCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.sm },
   formLabel: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  formInput: {
-    backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.md, paddingHorizontal: Spacing.md, height: 50,
-    color: Colors.text, fontSize: FontSize.md,
-  },
+  formInput: { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.md, paddingHorizontal: Spacing.md, height: 50, color: Colors.text, fontSize: FontSize.md },
   formHint: { color: Colors.textMuted, fontSize: FontSize.xs, lineHeight: 18 },
 
-  ruleCard: {
-    backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.sm,
-  },
+  ruleCard: { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.sm },
   ruleTitle: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.bold, marginBottom: 4 },
   ruleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   ruleText: { flex: 1, color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 20 },
@@ -990,119 +884,66 @@ const styles = StyleSheet.create({
   backLink: { alignItems: 'center', paddingVertical: Spacing.sm },
   backLinkText: { color: Colors.textSecondary, fontSize: FontSize.sm },
 
-  statusBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.primaryMuted, borderWidth: 1, borderColor: 'rgba(0,200,83,0.3)',
-    borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: 10,
-  },
+  statusBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, backgroundColor: Colors.primaryMuted, borderWidth: 1, borderColor: 'rgba(0,200,83,0.3)', borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: 10 },
   statusBannerWarning: { backgroundColor: Colors.warningMuted, borderColor: Colors.warning },
   statusBannerText: { flex: 1, color: Colors.primary, fontSize: FontSize.sm, fontWeight: FontWeight.medium },
 
-  progressCard: {
-    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.xl, padding: Spacing.xl, gap: Spacing.md,
-  },
+  progressCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.xl, padding: Spacing.xl, gap: Spacing.md },
   progressLabel: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.medium },
   progressNumbers: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   progressCurrent: { color: Colors.primary, fontSize: 42, fontWeight: FontWeight.bold },
   progressSep: { color: Colors.textMuted, fontSize: 28 },
   progressTarget: { color: Colors.text, fontSize: FontSize.lg, fontWeight: FontWeight.semibold },
-  progressBarTrack: {
-    height: 8, backgroundColor: Colors.surfaceElevated, borderRadius: 4, overflow: 'hidden',
-  },
+  progressBarTrack: { height: 8, backgroundColor: Colors.surfaceElevated, borderRadius: 4, overflow: 'hidden' },
   progressBarFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 4 },
   progressMeta: { flexDirection: 'row', justifyContent: 'space-between' },
   progressMetaText: { color: Colors.textMuted, fontSize: FontSize.xs },
 
-  referralCard: {
-    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.primary,
-    borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.md,
-  },
+  referralCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.primary, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.md },
   referralTitle: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.medium },
-  referralCodeRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.primaryMuted, borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
-  },
-  referralCode: {
-    flex: 1, color: Colors.primary, fontSize: FontSize.xxl,
-    fontWeight: FontWeight.bold, letterSpacing: 2,
-  },
+  referralCodeRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.primaryMuted, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md },
+  referralCode: { flex: 1, color: Colors.primary, fontSize: FontSize.xxl, fontWeight: FontWeight.bold, letterSpacing: 2 },
   copyBtn: { padding: 4 },
   referralHint: { color: Colors.textMuted, fontSize: FontSize.xs, lineHeight: 18 },
-  shareBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.primary, borderRadius: Radius.md, height: 46,
-  },
+  shareBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, backgroundColor: Colors.primary, borderRadius: Radius.md, height: 46 },
   shareBtnText: { color: Colors.black, fontWeight: FontWeight.bold, fontSize: FontSize.sm },
 
-  reEnrollBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.warning, borderRadius: Radius.md, height: 50,
-  },
+  reEnrollBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, backgroundColor: Colors.warning, borderRadius: Radius.md, height: 50 },
   reEnrollText: { color: Colors.black, fontWeight: FontWeight.bold, fontSize: FontSize.sm },
 
-  pitchSection: { gap: Spacing.sm },
-  sectionHeader2: {
-    color: Colors.text, fontSize: FontSize.lg, fontWeight: FontWeight.bold, marginBottom: 4,
-  },
-  pitchSub: { color: Colors.textSecondary, fontSize: FontSize.sm, marginBottom: Spacing.sm },
-  pitchCard: {
-    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.lg, padding: Spacing.md, gap: Spacing.sm,
-  },
-  pitchCardOpen: { borderColor: Colors.primary },
-  pitchCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  pitchAudienceBadge: {
-    backgroundColor: Colors.primaryMuted, borderRadius: Radius.full,
-    paddingHorizontal: 10, paddingVertical: 4,
-  },
-  pitchAudience: { color: Colors.primary, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  pitchHeadline: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold, lineHeight: 20 },
-  pitchBody: {
-    color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 22,
-    borderTopWidth: 1, borderTopColor: Colors.surfaceBorder, paddingTop: Spacing.sm,
-    marginTop: Spacing.xs,
-  },
+  bankRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.surfaceBorder },
+  bankRowSelected: { backgroundColor: Colors.primaryMuted },
+  bankName: { color: Colors.text, fontSize: FontSize.sm, flex: 1, paddingRight: Spacing.sm },
 
-  onboardingCard: {
-    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.success,
-    borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.md,
-  },
-  onboardingTitle: { color: Colors.text, fontSize: FontSize.md, fontWeight: FontWeight.bold },
-  onboardingText: { color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 22 },
-
-  cycleCard: {
-    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.xl, padding: Spacing.xl, gap: Spacing.md,
-  },
+  cycleCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.xl, padding: Spacing.xl, gap: Spacing.md },
   cycleCardComplete: { borderColor: Colors.success },
   cycleCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   cycleCardTitle: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  cycleCompleteBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: Colors.successMuted, borderRadius: Radius.full,
-    paddingHorizontal: 10, paddingVertical: 4,
-  },
+  cycleCompleteBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.successMuted, borderRadius: Radius.full, paddingHorizontal: 10, paddingVertical: 4 },
   cycleCompleteBadgeText: { color: Colors.success, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
   cycleActiveText: { color: Colors.primary, fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
   cycleNumbers: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   cycleCurrent: { color: Colors.primary, fontSize: 36, fontWeight: FontWeight.bold },
   cycleSep: { color: Colors.textMuted, fontSize: 24 },
   cycleTarget: { color: Colors.text, fontSize: FontSize.md, fontWeight: FontWeight.semibold },
-  cycleReward: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xs,
-  },
+  cycleReward: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xs },
   cycleRewardText: { color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 },
   payoutStatusBadge: { borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 3 },
   payoutStatusText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold },
 
+  pitchSection: { gap: Spacing.sm },
+  sectionHeader2: { color: Colors.text, fontSize: FontSize.lg, fontWeight: FontWeight.bold, marginBottom: 4 },
+  pitchSub: { color: Colors.textSecondary, fontSize: FontSize.sm, marginBottom: Spacing.sm },
+  pitchCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, padding: Spacing.md, gap: Spacing.sm },
+  pitchCardOpen: { borderColor: Colors.primary },
+  pitchCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pitchAudienceBadge: { backgroundColor: Colors.primaryMuted, borderRadius: Radius.full, paddingHorizontal: 10, paddingVertical: 4 },
+  pitchAudience: { color: Colors.primary, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
+  pitchHeadline: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold, lineHeight: 20 },
+  pitchBody: { color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 22, borderTopWidth: 1, borderTopColor: Colors.surfaceBorder, paddingTop: Spacing.sm, marginTop: Spacing.xs },
+
   payoutSection: { gap: Spacing.sm },
-  payoutRow: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.md, padding: Spacing.md,
-  },
+  payoutRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.md, padding: Spacing.md },
   payoutIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   payoutLabel: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
   payoutMeta: { color: Colors.textSecondary, fontSize: FontSize.xs, marginTop: 2 },
