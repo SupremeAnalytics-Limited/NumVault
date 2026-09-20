@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, ActivityIndicator, Modal,
@@ -38,6 +38,7 @@ export default function CheckoutScreen() {
     wholesale_price: string; // Socially.ng raw wholesale cost — used for exact Paystack split
   }>();
 
+  const [balanceReady, setBalanceReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [webViewUrl, setWebViewUrl] = useState<string | null>(null);
   const [paystackRef, setPaystackRef] = useState<string | null>(null);
@@ -45,6 +46,11 @@ export default function CheckoutScreen() {
   const [purchaseStage, setPurchaseStage] = useState<'idle' | 'paying' | 'purchasing'>('idle');
   // Guard: prevent handleWebViewNav from firing executePurchase more than once per payment attempt
   const callbackFiredRef = React.useRef(false);
+
+  // Refresh wallet balance on mount so the checkout always shows the live balance.
+  useEffect(() => {
+    refreshProfile().finally(() => setBalanceReady(true));
+  }, []);
 
   const price = parseFloat(params.price || '0');
   // Wholesale cost from Socially.ng — the exact amount Socially.ng must receive.
@@ -130,7 +136,7 @@ export default function CheckoutScreen() {
     setPurchaseError(null);
 
     // ── Wallet-first: skip Paystack entirely if balance covers the price ──
-    if (walletBalance >= price) {
+    if (canPayFromWallet) {
       trackCheckoutOpened(params.project_name, price, true);
       setPurchaseStage('purchasing');
       setLoading(true);
@@ -192,14 +198,16 @@ export default function CheckoutScreen() {
     }
   };
 
-  const payBtnLabel = walletBalance >= price
+  const canPayFromWallet = balanceReady && walletBalance >= price;
+
+  const payBtnLabel = canPayFromWallet
     ? `Pay \u20a6${price.toLocaleString()} from Wallet`
     : `Pay \u20a6${price.toLocaleString()}`;
 
   const stageLabel = purchaseStage === 'paying'
     ? 'Opening payment...'
     : purchaseStage === 'purchasing'
-    ? (walletBalance >= price ? 'Paying from wallet...' : 'Securing your number...')
+    ? (canPayFromWallet ? 'Paying from wallet...' : 'Securing your number...')
     : null;
 
   return (
@@ -226,7 +234,7 @@ export default function CheckoutScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
       >
         {/* ── Wallet balance banner (if sufficient) ── */}
-        {walletBalance >= price && (
+        {canPayFromWallet && (
           <View style={styles.walletBanner}>
             <MaterialIcons name="account-balance-wallet" size={16} color={Colors.primary} />
             <Text style={styles.walletBannerText}>
@@ -280,8 +288,8 @@ export default function CheckoutScreen() {
           </View>
         </View>
 
-        {/* ── Payment methods (only shown when wallet doesn't cover the price) ── */}
-        {walletBalance < price && (
+        {/* ── Payment methods (shown while balance loads or when wallet is insufficient) ── */}
+        {(!balanceReady || !canPayFromWallet) && (
         <View style={styles.methodsCard}>
           <Text style={styles.methodsTitle}>Pay with</Text>
           <View style={styles.methodsList}>
@@ -364,7 +372,7 @@ export default function CheckoutScreen() {
             </View>
           ) : (
             <>
-              <MaterialIcons name={walletBalance >= price ? 'account-balance-wallet' : 'payment'} size={20} color={Colors.black} />
+              <MaterialIcons name={canPayFromWallet ? 'account-balance-wallet' : 'payment'} size={20} color={Colors.black} />
               <Text style={styles.payBtnText}>{payBtnLabel}</Text>
             </>
           )}
