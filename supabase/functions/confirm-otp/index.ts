@@ -153,7 +153,7 @@ Deno.serve(async (req: Request) => {
           notifyAdmin(
             supabaseAdmin, result.participant_id,
             '🏆 [participant] qualified as an ambassador',
-            `[participant] reached 76 customers and is now an active lead. Block 1 starts now.`,
+            `[participant] reached 76 customers and is now an active lead. Month 1 starts now.`,
             { type: 'admin_qualified_76', participant_id: result.participant_id },
           ).catch((e) => console.warn('Admin push error:', e)),
         );
@@ -181,7 +181,7 @@ Deno.serve(async (req: Request) => {
               await sendParticipantPush(
                 supabaseAdmin, result.participant_id!,
                 '💰 Payout pending review',
-                `Your ${amtStr} payout for Block ${blockNum} Half ${half} is under review. We will notify you when it is approved.`,
+                `Your ${amtStr} payout for Month ${blockNum} Half ${half} is under review. We will notify you when it is approved.`,
                 { type: 'payout_under_review', payout_id: payoutId },
               ).catch(() => {});
 
@@ -189,7 +189,7 @@ Deno.serve(async (req: Request) => {
               await notifyAdmin(
                 supabaseAdmin, result.participant_id!,
                 '📋 [participant] has a payout ready for review',
-                `[participant] has a payout ready for review: ${amtStr} Block ${blockNum} Half ${half}.`,
+                `[participant] has a payout ready for review: ${amtStr} Month ${blockNum} Half ${half}.`,
                 { type: 'admin_payout_review', payout_id: payoutId },
               ).catch(() => {});
             })(),
@@ -316,7 +316,7 @@ async function sendReferralPushNotification(
   newCount: number,
   newStatus: string | null,
 ): Promise<void> {
-  // Determine whether the participant is in a paid block or still qualifying.
+  // Determine whether the participant is in a paid month or still qualifying.
   // Re-fetch the current participant record for the most accurate status.
   const { data: participant } = await supabase
     .from('acquisition_participants')
@@ -333,28 +333,28 @@ async function sendReferralPushNotification(
 
   if (effectiveStatus === 'active_lead' && (newCount >= 76 || newStatus === 'active_lead')) {
     // This customer was the 76th that triggered qualification → transition to active_lead
-    title = '🏆 You qualified! Block 1 starts now.';
-    body = 'You referred 76 customers and are now a NumVault Customer Acquisition Lead. Your 30-day paid Block 1 has begun.';
+    title = '🏆 76 customers reached!';
+    body = 'You reached 76 customers. Your next 30-day month starts now.';
   } else if (effectiveStatus === 'active_lead') {
-    // Already an active lead — count increments inside a paid block
+    // Already an active lead — count increments inside a paid month
     if (newCount >= 76) {
-      title = `🎉 Block ${blockNum} complete!`;
-      body = `You reached 76 customers in Block ${blockNum}. Both halves are now under review. Your next block starts immediately.`;
+      title = '🏆 76 customers reached!';
+      body = 'You reached 76 customers. Your next 30-day month starts now.';
     } else if (newCount === 38) {
-      title = `✅ Half of Block ${blockNum} complete!`;
-      body = `38 customers confirmed for Block ${blockNum}. Half 1 (₦50,000) is now under review. Keep going!`;
+      title = `✅ Half of Month ${blockNum} complete!`;
+      body = `38 customers confirmed for Month ${blockNum}. Half 1 (₦50,000) is now under review. Keep going!`;
     } else if (newCount >= 70) {
-      title = `🔥 Almost done — ${newCount}/76 in Block ${blockNum}`;
-      body = `Only ${76 - newCount} more customers to complete Block ${blockNum}.`;
+      title = `🔥 Almost done — ${newCount}/76 in Month ${blockNum}`;
+      body = `Only ${76 - newCount} more customers to complete this month.`;
     } else {
       title = '🎉 New referral confirmed!';
-      body = `Customer #${newCount} validated for Block ${blockNum}. ${76 - newCount} more to complete this block.`;
+      body = `Customer #${newCount} validated for Month ${blockNum}. ${76 - newCount} more to complete this month.`;
     }
   } else {
     // Qualifying stage
     if (newCount >= 76) {
-      title = '🏆 You did it! 76 customers!';
-      body = 'You have qualified as a NumVault Customer Acquisition Lead. Block 1 starts now — your 30-day paid period has begun.';
+      title = '🏆 76 customers reached!';
+      body = 'You reached 76 customers. Your next 30-day month starts now.';
     } else if (newCount === 38) {
       title = '⚡ Halfway there!';
       body = '38 customers confirmed! Keep going — 38 more to qualify as a NumVault Lead.';

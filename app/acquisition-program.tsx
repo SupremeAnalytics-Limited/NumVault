@@ -44,20 +44,20 @@ const LANDING_STEPS = [
     label: 'Customer Acquisition Lead commitment',
     icon: 'emoji-events' as const,
     title: 'Earn your Job Position with our company as a Customer Acquisition Lead',
-    body: 'You are considered a Brand Ambassador for NumVault. Share your referral code with people, each person just needs to sign up and make one purchase for our system to confirm them as your customer. Your first 76 confirmed customers show us that you are reliable and ready to represent our company. Once we see that, we officially bring you on as a Customer Acquisition Lead and set up your Staff Dashboard. We will ask for your Nigerian bank account number, no card details. We can transfer to Palmpay, Kuda, Opay, and any Nigerian banks or microfinance banks. We use Paystack, our payments processor, to transfer your earnings directly to your account. The pay is ₦100,000 per month. This contract is for 6 months, extended time with us can be applied for at support@numvault.cloud',
+    body: 'You are a Brand Ambassador for NumVault. Share your referral code. A referral counts when a new customer signs up with your code and pays for at least one number. Each customer must have a different email address and counts once. Your first 76 customers are an unpaid qualification, and you have 30 days to reach them. At 76 you are brought on automatically as a Customer Acquisition Lead and your Staff Dashboard opens. Each month, 76 customers earns you ₦100,000, paid in two halves of ₦50,000. You have 30 days for each month, and if you reach 76 sooner your next month starts straight away. The contract is for six months, for up to ₦600,000 in total. Every payout is reviewed before it is sent. We pay by Paystack to Nigerian bank accounts, including Palmpay, Kuda and Opay. No card details. If you want to extend your contract beyond six months, email support@numvault.cloud.',
   },
 ];
 
 const QUAL_RULES = [
-  "Refer 76 paying customers and we officially bring you on as a Customer Acquisition Lead.",
-  "Go at your own pace — no daily targets. 1 a day or all 76 in a week, it's entirely up to you.",
-  "If your 30 days run out before you hit 76, your count resets and you can start fresh anytime.",
+  "Refer 76 paying customers within 30 days. This stage is unpaid.",
+  "Go at your own pace. No daily targets.",
+  "If your 30 days run out before you reach 76, your count resets to 0 and you can start again.",
 ];
 
 const PAID_RULES = [
-  "You earn for every single paying customer you refer — whether it is 1 or 76. Every referral counts.",
-  "At 38 customers a half payout (₦50,000) goes under review. At 76, the second half (₦50,000) goes under review and your next block starts immediately.",
-  "Didn't hit 76 this block? No worries — you still get paid for every customer you brought in. Re-qualify to start the next round.",
+  "You earn for every paying customer you refer, whether it is 1 or 76.",
+  "At 38 customers a half payout (₦50,000) goes under review. At 76, the second half (₦50,000) goes under review and your next month starts immediately. Every payout is checked before it is sent.",
+  "Didn't hit 76 this month? You still get paid for every customer you brought in. Re-qualify to start again.",
 ];
 
 // ── Payout status display ────────────────────────────────────────────────────
@@ -170,7 +170,7 @@ export default function AcquisitionProgramScreen() {
         setParticipant(p);
         resolveAcqLaunchState(p);
         setDestinationScreen('dashboard');
-        if (p.status === 'active_lead') setDashTab('onteam');
+        if (p.status === 'active_lead' || p.status === 'contract_complete') setDashTab('onteam');
         else setDashTab('proving');
         const [refs, pays] = await Promise.all([getMyReferredCustomers(p.id), getMyPayouts(p.id)]);
         setReferred(refs);
@@ -336,6 +336,11 @@ export default function AcquisitionProgramScreen() {
   // ── Derived state ────────────────────────────────────────────────────────────
   const isQualified = participant?.status === 'active_lead' || participant?.status === 'contract_complete';
   const qualCount = participant?.qualification_customers_count ?? 0;
+
+  // Switch to onteam tab automatically if participant becomes qualified while screen is open
+  useEffect(() => {
+    if (isQualified) setDashTab('onteam');
+  }, [isQualified]);
 
   // For qualifying tab: daysLeft is from qualification_start_date
   // For active_lead tab: daysLeft is from paid_period_start_date
@@ -545,27 +550,29 @@ export default function AcquisitionProgramScreen() {
       {/* ── DASHBOARD ── */}
       {screen === 'dashboard' && participant && (
         <View style={{ flex: 1 }}>
-          {/* Tabs */}
-          <View style={styles.tabsRow}>
-            <TouchableOpacity
-              style={[styles.tabBtn, dashTab === 'proving' && styles.tabBtnActive]}
-              onPress={async () => { await Haptics.selectionAsync(); setDashTab('proving'); }}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.tabBtnText, dashTab === 'proving' && styles.tabBtnTextActive]}>
-                Earn your invite
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tabBtn, dashTab === 'onteam' && styles.tabBtnActive]}
-              onPress={async () => { await Haptics.selectionAsync(); setDashTab('onteam'); }}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.tabBtnText, dashTab === 'onteam' && styles.tabBtnTextActive]}>
-                On the team
-              </Text>
-            </TouchableOpacity>
-          </View>
+          {/* Tabs — hidden when qualified (only On the team remains) */}
+          {!isQualified && (
+            <View style={styles.tabsRow}>
+              <TouchableOpacity
+                style={[styles.tabBtn, dashTab === 'proving' && styles.tabBtnActive]}
+                onPress={async () => { await Haptics.selectionAsync(); setDashTab('proving'); }}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.tabBtnText, dashTab === 'proving' && styles.tabBtnTextActive]}>
+                  Earn your invite
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tabBtn, dashTab === 'onteam' && styles.tabBtnActive]}
+                onPress={async () => { await Haptics.selectionAsync(); setDashTab('onteam'); }}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.tabBtnText, dashTab === 'onteam' && styles.tabBtnTextActive]}>
+                  On the team
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={{ flex: 1 }}>
             {/* Lock overlay for "On the team" if not qualified */}
@@ -615,7 +622,7 @@ export default function AcquisitionProgramScreen() {
                           <Text style={styles.topCardSub}>76 customers. Unlock your income.</Text>
                         </View>
                         <View style={styles.topCardRight}>
-                          <Text style={styles.topCardLabel}>If you join us, you will earn</Text>
+                          <Text style={styles.topCardLabel}>You can earn up to</Text>
                           <Text style={styles.topCardBig}>₦600,000</Text>
                           <Text style={styles.topCardBigSub}>over your 6-month contract</Text>
                         </View>
@@ -705,16 +712,16 @@ export default function AcquisitionProgramScreen() {
                     <View style={styles.topCard}>
                       <View style={styles.topCardTop}>
                         <View style={styles.topCardLeft}>
-                          <Text style={styles.topCardLabel}>Block {blockNum} of 6</Text>
+                          <Text style={styles.topCardLabel}>Month {blockNum} of 6</Text>
                           <Text style={styles.topCardHeadline}>
-                            {monthsRemaining} blocks <Text style={{ color: GREEN }}>remaining</Text>
+                            {monthsRemaining} months <Text style={{ color: GREEN }}>remaining</Text>
                           </Text>
-                          <Text style={styles.topCardSub}>{daysLeft} days in this block.</Text>
+                          <Text style={styles.topCardSub}>{daysLeft} days left this month.{'\n'}Reach 76 early and your next month starts straight away.</Text>
                         </View>
                         <View style={styles.topCardRight}>
                           <Text style={styles.topCardLabel}>Potential remaining</Text>
                           <Text style={styles.topCardBig}>₦{potentialRemaining.toLocaleString()}</Text>
-                          <Text style={styles.topCardBigSub}>across {monthsRemaining} blocks</Text>
+                          <Text style={styles.topCardBigSub}>across {monthsRemaining} months</Text>
                         </View>
                       </View>
                       <View style={styles.topCardDivider} />
@@ -724,7 +731,7 @@ export default function AcquisitionProgramScreen() {
                             <MaterialIcons name="schedule" size={15} color={GREEN} />
                           </View>
                           <View>
-                            <Text style={styles.statLabel}>Customers this block</Text>
+                            <Text style={styles.statLabel}>Customers this month</Text>
                             <Text style={styles.statVal}>{qualCount} / 76</Text>
                           </View>
                         </View>
@@ -748,7 +755,7 @@ export default function AcquisitionProgramScreen() {
                           <MaterialIcons name="event-note" size={16} color={GREEN} />
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.scardTitle}>Your 30-day block — Block {blockNum}</Text>
+                          <Text style={styles.scardTitle}>Month {blockNum}: 30 days or 76 customers, whichever comes first</Text>
                           <Text style={styles.scardSub}>Tap to see how it works</Text>
                         </View>
                         <MaterialIcons name={reqOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-right'} size={20} color={MUTED} />
@@ -765,9 +772,9 @@ export default function AcquisitionProgramScreen() {
                           <View style={styles.payNotice}>
                             <Text style={styles.payNoticeTitle}>How your pay works</Text>
                             <Text style={styles.payNoticeBody}>
-                              <Text style={{ color: GREEN }}>①</Text> Your 30-day block started when you qualified.{'\n'}
-                              <Text style={{ color: GREEN }}>②</Text> At 38 customers, ₦50,000 goes under review. At 76, another ₦50,000 goes under review and your next block starts.{'\n'}
-                              <Text style={{ color: GREEN }}>③</Text> If your block closes before 76, you are paid proportionally for what you achieved and asked to re-qualify for the next block.
+                              <Text style={{ color: GREEN }}>①</Text> Your first month started when you qualified.{'\n'}
+                              <Text style={{ color: GREEN }}>②</Text> At 38 customers, ₦50,000 goes under review. At 76, another ₦50,000 goes under review and your next month starts.{'\n'}
+                              <Text style={{ color: GREEN }}>③</Text> If your 30 days end before 76, you are paid for the customers you brought in and asked to re-qualify to start again.
                             </Text>
                           </View>
                         </View>
@@ -859,7 +866,7 @@ export default function AcquisitionProgramScreen() {
                       <View style={styles.requalCard}>
                         <MaterialIcons name="info" size={14} color="#fb923c" />
                         <Text style={styles.requalText}>
-                          Your last block closed without reaching 76. Re-enroll to start your next qualification round.
+                          Your last month ended without reaching 76. Re-enroll to start again.
                         </Text>
                       </View>
                     ) : null}
@@ -924,7 +931,7 @@ export default function AcquisitionProgramScreen() {
                           <View style={{ flex: 1 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                               <Text style={styles.payoutLabel}>
-                                Block {pout.block_number ?? '?'} · Half {pout.cycle_number}
+                                Month {pout.block_number ?? '?'} · Half {pout.cycle_number}
                               </Text>
                               <View style={[styles.payoutChip, { backgroundColor: meta.color + '22', borderColor: meta.color + '55' }]}>
                                 <Text style={[styles.payoutChipText, { color: meta.color }]}>{meta.text}</Text>
@@ -969,8 +976,8 @@ export default function AcquisitionProgramScreen() {
             <View style={styles.payNotice}>
               <Text style={styles.payNoticeTitle}>How your pay works</Text>
               <Text style={styles.payNoticeBody}>
-                <Text style={{ color: GREEN }}>①</Text> Your 30-day block is now running.{'\n'}
-                <Text style={{ color: GREEN }}>②</Text> At 38 customers, ₦50,000 goes under admin review. At 76, another ₦50,000 goes under review and your next block starts immediately.{'\n'}
+                <Text style={{ color: GREEN }}>①</Text> Your first month is now running.{'\n'}
+                <Text style={{ color: GREEN }}>②</Text> At 38 customers, ₦50,000 goes under admin review. At 76, another ₦50,000 goes under review and your next month starts immediately.{'\n'}
                 <Text style={{ color: GREEN }}>③</Text> We will push you a notification when each payout is approved.
               </Text>
             </View>
