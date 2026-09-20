@@ -102,33 +102,60 @@ Deno.serve(async (req: Request) => {
 
     if (rpcErr) {
       console.error('complete_order_with_otp RPC error:', rpcErr);
-      // Fallback: write directly (non-counted path) so the user still gets their OTP
-      await supabaseAdmin
+      // A1: Do not write directly — return pending so next poll retries cleanly.
+      return new Response(JSON.stringify({ status: 'pending' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    console.log('complete_order_with_otp result:', JSON.stringify(rpcResult));
+
+    const result = rpcResult as {
+      result: string;
+      status?: string;
+      otp?: string;
+      counted?: boolean;
+      new_count?: number;
+      participant_id?: string;
+    };
+
+    // A2: Only return otp when DB function confirms completion.
+    //     already_handled / already_handled_ledger → look up current order status.
+    if (result?.result !== 'completed') {
+      const { data: freshOrder } = await supabaseAdmin
         .from('orders')
-        .update({ otp, status: 'completed' })
+        .select('status, otp')
         .eq('id', orderId)
-        .eq('status', 'pending');
-    } else {
-      console.log('complete_order_with_otp result:', JSON.stringify(rpcResult));
+        .maybeSingle();
+      return new Response(
+        JSON.stringify({ status: freshOrder?.status ?? result.result }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
 
-      // ── If a new referral was counted, notify the participant ──────────────
-      const result = rpcResult as {
-        result: string;
-        otp?: string;
-        counted?: boolean;
-        new_count?: number;
-        participant_id?: string;
-      };
+    // A3: Await notifications (both participant + admin) before returning;
+    //     errors in either must never block OTP delivery.
+    const notifyPromises: Promise<void>[] = [];
 
-      if (result?.counted && result.participant_id && result.new_count !== undefined) {
-        // Fire-and-forget — notification failure must never block OTP delivery
+    if (result.counted && result.participant_id && result.new_count !== undefined) {
+      notifyPromises.push(
         sendReferralPushNotification(
           supabaseAdmin,
           result.participant_id,
           result.new_count,
-        ).catch((e) => console.warn('Push notification error (non-blocking):', e));
+        ).catch((e) => console.warn('Participant push notification error:', e)),
+      );
+
+      // B2: When count reaches 76, also push admin.
+      if (result.new_count >= 76) {
+        notifyPromises.push(
+          notifyAdminOf76(supabaseAdmin, result.participant_id)
+            .catch((e) => console.warn('Admin 76-reached notification error:', e)),
+        );
       }
     }
+
+    await Promise.all(notifyPromises);
 
     return new Response(JSON.stringify({ status: 'completed', otp }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -174,6 +201,52 @@ async function fetchOTPFromSocially(
     console.warn('fetchOTPFromSocially error:', e);
     return null;
   }
+}
+
+// ── Admin notification when participant reaches 76 ─────────────────────────
+
+const ADMIN_EMAIL = 'oluwaferanmionabanjo@gmail.com';
+
+async function notifyAdminOf76(
+  supabase: ReturnType<typeof createClient>,
+  participantId: string,
+): Promise<void> {
+  // Get participant name
+  const { data: participant } = await supabase
+    .from('acquisition_participants')
+    .select('name')
+    .eq('id', participantId)
+    .maybeSingle();
+
+  const name = participant?.name ?? 'A participant';
+
+  // Get admin push token via email → user_profiles
+  const { data: adminProfile } = await supabase
+    .from('user_profiles')
+    .select('id, push_token')
+    .eq('email', ADMIN_EMAIL)
+    .maybeSingle();
+
+  const pushToken = adminProfile?.push_token;
+  if (!pushToken || !pushToken.startsWith('ExponentPushToken[')) {
+    console.log('Admin push token not available — skipping admin notification');
+    return;
+  }
+
+  await fetch('https://exp.host/--/api/v2/push/send', {
+    method: 'POST',
+    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      to: pushToken,
+      title: '🔔 Review required',
+      body: `${name} reached 76 customers and is waiting for your review.`,
+      data: { type: 'admin_review_76', participant_id: participantId },
+      sound: 'default',
+      priority: 'high',
+    }),
+  });
+
+  console.log(`Admin notified: ${name} reached 76 (participant ${participantId})`);
 }
 
 // ── Referral push notification (mirrors sms-webhook logic) ───────────────────

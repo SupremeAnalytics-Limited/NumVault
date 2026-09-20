@@ -250,6 +250,18 @@ export default function AcquisitionProgramScreen() {
       setPayouts([]);
       setDashTab('proving');
       setScreen('dashboard');
+      // B1: Notify admin of new enrollment — fire-and-forget, never blocks UI
+      (async () => {
+        try {
+          const { getSupabaseClient } = await import('@/template');
+          const supabase = getSupabaseClient();
+          await supabase.functions.invoke('notify-admin', {
+            body: { action: 'enrollment', participant_name: enrollName.trim() },
+          });
+        } catch {
+          // Non-blocking — admin notification failure must never surface to user
+        }
+      })();
     } catch (e: any) {
       showAlert('Enrollment failed', e.message || 'Please try again.');
     } finally {
