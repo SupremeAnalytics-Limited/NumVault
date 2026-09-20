@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, ActivityIndicator, Share, TextInput,
-  KeyboardAvoidingView, Platform, Dimensions, Modal,
+  KeyboardAvoidingView, Platform, Dimensions, Modal, Animated,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -19,13 +19,11 @@ import {
 } from '@/services/acquisitionService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
-type Screen = 'landing' | 'enroll' | 'qualifying' | 'pending_review' | 'eligible' | 'bank_onboarding' | 'active_lead';
+type Screen = 'landing' | 'enroll' | 'dashboard' | 'bank_onboarding';
+type DashTab = 'proving' | 'onteam';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// ── Launch state for acquisition landing ─────────────────────────────────────
-// first_launch / downgraded → no skip allowed on any screen
-// active_staff               → skip allowed on screens 1–3 only
 type AcqLaunchState = 'first_launch' | 'downgraded' | 'active_staff';
 
 const LANDING_STEPS = [
@@ -34,34 +32,40 @@ const LANDING_STEPS = [
     icon: 'business' as const,
     title: 'We build software that opens doors',
     body: 'SupremeAnalytics is a Nigerian software company. We build products that give everyday people — students, freelancers, and working professionals — access to the same digital opportunities as anyone else in the world.',
-    highlights: null as null | { icon: string; label: string; sub: string }[],
-    bullets: null as null | { text: string; check: boolean }[],
   },
   {
     label: 'Side income',
     icon: 'schedule' as const,
     title: 'A side income that fits your life',
     body: "Whether you're in school, at work, or building your own thing — we've created a way for you to earn on the side without changing anything about your routine. No office. No fixed hours. Just results.",
-    highlights: null,
-    bullets: null,
   },
   {
     label: 'NumVault product',
     icon: 'phone-android' as const,
     title: 'Protect your number. Power your business.',
     body: "NumVault gives you a dedicated number for any platform — one that's yours permanently, with no recurring fees. It keeps your personal number private while giving your business, clients, and online activities their own dedicated lines. 2,300+ services. One place. People need this every day — your job is to show them it exists.",
-    highlights: null,
-    bullets: null,
   },
   {
     label: 'Customer Acquisition Lead commitment',
     icon: 'emoji-events' as const,
     title: 'Earn your Job Position with our company as a Customer Acquisition Lead',
     body: 'Refer 76 paying customers in 30 days and we officially bring you on as a Customer Acquisition Lead — a paid staff role with your own dashboard and up to ₦100,000 a month. This is how you start.',
-    highlights: null,
-    bullets: null,
   },
 ];
+
+const QUAL_RULES = [
+  "Refer 76 paying customers and we send you an official invite to join NumVault as a Customer Acquisition Lead.",
+  "Go at your own pace — no daily targets. 1 a day or all 76 in a week, it's entirely up to you.",
+  "If your 30 days run out before you hit 76, your count resets and you can start fresh anytime — no hard feelings.",
+];
+
+const PAID_RULES = [
+  "You earn for every single paying customer you refer — whether it's 1 or 76. Every referral counts toward your pay.",
+  "Refer all 76 and your next paid month kicks off immediately — no waiting around.",
+  "Didn't hit 76 this month? No worries — you still get paid for every customer you brought in. Just re-qualify to start the next round.",
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function AcquisitionProgramScreen() {
   const insets = useSafeAreaInsets();
@@ -74,16 +78,26 @@ export default function AcquisitionProgramScreen() {
   const [payouts, setPayouts] = useState<LeadPayout[]>([]);
   const [pitches, setPitches] = useState<PitchItem[]>([]);
   const [screen, setScreen] = useState<Screen>('landing');
+  const [dashTab, setDashTab] = useState<DashTab>('proving');
 
+  // Landing
   const [landingStep, setLandingStep] = useState(0);
   const [acqLaunchState, setAcqLaunchState] = useState<AcqLaunchState>('first_launch');
   const landingScrollRef = useRef<ScrollView>(null);
-
   const [destinationScreen, setDestinationScreen] = useState<Screen>('enroll');
 
+  // Enroll
   const [enrollName, setEnrollName] = useState('');
   const [enrolling, setEnrolling] = useState(false);
 
+  // Dashboard UI state
+  const [reqOpen, setReqOpen] = useState(false);
+  const [c2Open, setC2Open] = useState(false);
+  const [pitchOpen, setPitchOpen] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const welcomeOpacity = useRef(new Animated.Value(0)).current;
+
+  // Bank onboarding
   const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [bankList, setBankList] = useState<{ name: string; code: string }[]>([]);
   const [selectedBank, setSelectedBank] = useState<{ name: string; code: string } | null>(null);
@@ -92,13 +106,15 @@ export default function AcquisitionProgramScreen() {
   const [resolvingAccount, setResolvingAccount] = useState(false);
   const [savingBank, setSavingBank] = useState(false);
 
-  const [pitchExpanded, setPitchExpanded] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
 
   useEffect(() => { loadAll(); }, []);
 
-  // Resolve whether this user has an active qualifying/lead record
-  const resolveAcqLaunchState = useCallback(async (p: AcquisitionParticipant | null) => {
+  useEffect(() => {
+    if (screen === 'bank_onboarding' && bankList.length === 0) loadBankList();
+  }, [screen]);
+
+  const resolveAcqLaunchState = useCallback((p: AcquisitionParticipant | null) => {
     if (!p) { setAcqLaunchState('first_launch'); return; }
     const isActive =
       p.status === 'active_lead' ||
@@ -110,10 +126,6 @@ export default function AcquisitionProgramScreen() {
     setAcqLaunchState(isActive ? 'active_staff' : isDowngraded ? 'downgraded' : 'first_launch');
   }, []);
 
-  useEffect(() => {
-    if (screen === 'bank_onboarding' && bankList.length === 0) loadBankList();
-  }, [screen]);
-
   const loadAll = async () => {
     try {
       setLoading(true);
@@ -122,12 +134,13 @@ export default function AcquisitionProgramScreen() {
       if (p) {
         setParticipant(p);
         resolveAcqLaunchState(p);
-        const destination = mapStatusToScreen(p);
-        setDestinationScreen(destination);
+        setDestinationScreen('dashboard');
+        // Default tab based on status
+        if (p.status === 'active_lead') setDashTab('onteam');
+        else setDashTab('proving');
         const [refs, pays] = await Promise.all([getMyReferredCustomers(p.id), getMyPayouts(p.id)]);
         setReferred(refs);
         setPayouts(pays);
-        // Always start at landing — enrolled users can skip through to their dashboard
         setScreen('landing');
       } else {
         resolveAcqLaunchState(null);
@@ -138,16 +151,6 @@ export default function AcquisitionProgramScreen() {
       console.error('AcquisitionProgram load error', e);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const mapStatusToScreen = (p: AcquisitionParticipant): Screen => {
-    switch (p.status) {
-      case 'qualifying':
-        return p.qualification_customers_count >= 76 ? 'pending_review' : 'qualifying';
-      case 'eligible_not_joined': return 'eligible';
-      case 'active_lead': return 'active_lead';
-      default: return 'landing';
     }
   };
 
@@ -179,7 +182,7 @@ export default function AcquisitionProgramScreen() {
       } else {
         showAlert('Account not found', 'Could not verify this account number. Please check the details.');
       }
-    } catch (e) {
+    } catch {
       showAlert('Error', 'Could not connect to bank verification service.');
     } finally {
       setResolvingAccount(false);
@@ -192,7 +195,6 @@ export default function AcquisitionProgramScreen() {
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const supabase = (await import('@/template')).getSupabaseClient();
-
       const recipientRes = await supabase.functions.invoke('create-transfer-recipient', {
         body: {
           action: 'create_recipient',
@@ -203,7 +205,6 @@ export default function AcquisitionProgramScreen() {
           account_name: resolvedAccountName,
         },
       });
-
       const { error } = await supabase
         .from('acquisition_participants')
         .update({
@@ -213,11 +214,10 @@ export default function AcquisitionProgramScreen() {
           paystack_recipient_code: recipientRes.data?.recipient_code ?? null,
         })
         .eq('id', participant.id);
-
       if (error) throw new Error(error.message);
-
       showAlert('Bank Details Saved', 'Your bank account has been saved. The NumVault team will activate your Lead account.');
       await loadAll();
+      setScreen('dashboard');
     } catch (e: any) {
       showAlert('Error', e.message || 'Failed to save bank details.');
     } finally {
@@ -234,7 +234,8 @@ export default function AcquisitionProgramScreen() {
       setParticipant(p);
       setReferred([]);
       setPayouts([]);
-      setScreen('qualifying');
+      setDashTab('proving');
+      setScreen('dashboard');
     } catch (e: any) {
       showAlert('Enrollment failed', e.message || 'Please try again.');
     } finally {
@@ -274,34 +275,67 @@ export default function AcquisitionProgramScreen() {
     });
   };
 
+  const triggerWelcome = () => {
+    setShowWelcome(true);
+    Animated.timing(welcomeOpacity, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+  };
+
+  const dismissWelcome = () => {
+    Animated.timing(welcomeOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => {
+      setShowWelcome(false);
+      setScreen('bank_onboarding');
+    });
+  };
+
   const daysLeft = daysRemainingInQualification(participant?.qualification_start_date ?? null);
   const qualCount = participant?.qualification_customers_count ?? 0;
-  const qualProgress = Math.min(qualCount / 76, 1);
   const windowExpired = daysLeft <= 0 && qualCount < 76 && participant?.status === 'qualifying';
+  const isQualified = participant?.status === 'active_lead' || participant?.status === 'eligible_not_joined';
 
   const cycleProgress = (() => {
-    if (participant?.status !== 'active_lead' || !participant.active_lead_start_month) return null;
+    if (!participant) return null;
     const windowStart = getCurrentMonthStart().toISOString().split('T')[0];
     return computeCycleProgress(referred, windowStart);
   })();
 
+  const c1 = Math.min(qualCount, 38);
+  const c2 = Math.max(0, qualCount - 38);
+
+  // Months remaining calc (for active_lead)
+  const monthsRemaining = 6; // TODO: derive from active_lead_start_month when available
+  const potentialRemaining = monthsRemaining * 100000;
+
   if (loading) {
     return (
       <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <ActivityIndicator color={Colors.primary} size="large" />
+        <ActivityIndicator color={styles.accent.color} size="large" />
       </View>
     );
   }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle="light-content" backgroundColor="#0a0d0a" />
+
+      {/* ── WELCOME OVERLAY ── */}
+      {showWelcome ? (
+        <Animated.View style={[styles.welcomeOverlay, { opacity: welcomeOpacity }]}>
+          <Text style={styles.welcomeEmoji}>🎉</Text>
+          <Text style={styles.welcomeTitle}>You did it.</Text>
+          <Text style={styles.welcomeSub}>
+            76 customers referred. You have proven yourself. Welcome to the NumVault team. Your Staff Dashboard is now available.
+          </Text>
+          <TouchableOpacity style={styles.welcomeBtn} onPress={dismissWelcome} activeOpacity={0.85}>
+            <Text style={styles.welcomeBtnText}>Proceed</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      ) : null}
 
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-          <MaterialIcons name="arrow-back" size={22} color={Colors.text} />
+          <MaterialIcons name="arrow-back" size={22} color="#4ade80" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Acquisition Program</Text>
+        <Text style={styles.headerTitle}>Customer Acquisition Lead</Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -315,43 +349,16 @@ export default function AcquisitionProgramScreen() {
             style={{ flex: 1 }}
           >
             {LANDING_STEPS.map((step, i) => (
-              <ScrollView key={i} style={{ width: SCREEN_WIDTH }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.landingPage}>
+              <ScrollView key={i} style={{ width: SCREEN_WIDTH }} showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.landingPage}>
                 <View style={styles.landingIconRow}>
                   <View style={styles.landingIconWrap}>
-                    <MaterialIcons name={step.icon} size={32} color={Colors.primary} />
+                    <MaterialIcons name={step.icon} size={32} color="#4ade80" />
                   </View>
                   <Text style={styles.landingStepLabel}>{step.label}</Text>
                 </View>
                 <Text style={styles.landingTitle}>{step.title}</Text>
-                {step.body ? <Text style={styles.landingBody}>{step.body}</Text> : null}
-                {step.highlights ? (
-                  <View style={styles.landingCard}>
-                    {step.highlights.map((h, hi) => (
-                      <View key={hi} style={[styles.highlightRow, hi === step.highlights!.length - 1 && { borderBottomWidth: 0 }]}>
-                        <View style={styles.highlightIcon}>
-                          <MaterialIcons name={h.icon as any} size={18} color={Colors.primary} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.highlightLabel}>{h.label}</Text>
-                          <Text style={styles.highlightSub}>{h.sub}</Text>
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
-                {step.bullets ? (
-                  <View style={styles.landingCard}>
-                    <Text style={[styles.landingBody, { marginBottom: Spacing.sm, fontWeight: FontWeight.semibold, color: Colors.text }]}>
-                      A customer counts when they:
-                    </Text>
-                    {step.bullets.map((b, bi) => (
-                      <View key={bi} style={styles.bulletRow}>
-                        <MaterialIcons name={b.check ? 'check' : 'close'} size={14} color={b.check ? Colors.success : Colors.error} />
-                        <Text style={styles.bulletText}>{b.text}</Text>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
+                <Text style={styles.landingBody}>{step.body}</Text>
                 <View style={{ height: 24 }} />
               </ScrollView>
             ))}
@@ -377,50 +384,30 @@ export default function AcquisitionProgramScreen() {
               }}
               activeOpacity={0.85}
             >
-              <MaterialIcons
-                name={landingStep < LANDING_STEPS.length - 1 ? 'arrow-forward' : participant ? 'dashboard' : 'rocket-launch'}
-                size={18}
-                color={Colors.black}
-              />
               <Text style={styles.ctaBtnText}>
                 {landingStep < LANDING_STEPS.length - 1
                   ? 'Next'
-                  : participant
-                  ? 'View My Progress'
-                  : 'Enroll in the Program'}
+                  : participant ? 'View My Progress' : 'Enroll in the Program'}
               </Text>
             </TouchableOpacity>
-            {/* Skip to dashboard — always visible for enrolled users on all screens */}
             {participant ? (
-              <TouchableOpacity
-                style={styles.backLink}
-                onPress={async () => {
-                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setScreen(destinationScreen);
-                }}
-              >
+              <TouchableOpacity style={styles.backLink}
+                onPress={async () => { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setScreen('dashboard'); }}>
                 <Text style={styles.backLinkText}>Skip to my dashboard</Text>
               </TouchableOpacity>
             ) : acqLaunchState === 'active_staff' && landingStep < LANDING_STEPS.length - 1 ? (
-              <TouchableOpacity
-                style={styles.backLink}
-                onPress={async () => {
-                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setScreen('enroll');
-                }}
-              >
+              <TouchableOpacity style={styles.backLink}
+                onPress={async () => { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setScreen('enroll'); }}>
                 <Text style={styles.backLinkText}>Skip intro</Text>
               </TouchableOpacity>
             ) : landingStep > 0 ? (
-              <TouchableOpacity
-                style={styles.backLink}
+              <TouchableOpacity style={styles.backLink}
                 onPress={async () => {
                   await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   const prev = landingStep - 1;
                   landingScrollRef.current?.scrollTo({ x: prev * SCREEN_WIDTH, animated: true });
                   setLandingStep(prev);
-                }}
-              >
+                }}>
                 <Text style={styles.backLinkText}>Back</Text>
               </TouchableOpacity>
             ) : null}
@@ -434,7 +421,7 @@ export default function AcquisitionProgramScreen() {
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             <View style={styles.heroCard}>
               <View style={styles.heroIcon}>
-                <MaterialIcons name="person-add" size={32} color={Colors.primary} />
+                <MaterialIcons name="person-add" size={32} color="#4ade80" />
               </View>
               <Text style={styles.heroTitle}>Enroll in the Program</Text>
               <Text style={styles.heroSub}>
@@ -449,7 +436,7 @@ export default function AcquisitionProgramScreen() {
                 value={enrollName}
                 onChangeText={setEnrollName}
                 placeholder="Enter your full name"
-                placeholderTextColor={Colors.textMuted}
+                placeholderTextColor="#3a6a3a"
                 autoCapitalize="words"
                 returnKeyType="done"
               />
@@ -466,7 +453,7 @@ export default function AcquisitionProgramScreen() {
                 'Your referral code will be generated automatically.',
               ].map((r, i) => (
                 <View key={i} style={styles.ruleRow}>
-                  <MaterialIcons name="info-outline" size={14} color={Colors.primary} />
+                  <View style={styles.ruleDot} />
                   <Text style={styles.ruleText}>{r}</Text>
                 </View>
               ))}
@@ -478,15 +465,13 @@ export default function AcquisitionProgramScreen() {
               disabled={!enrollName.trim() || enrolling}
               activeOpacity={0.85}
             >
-              {enrolling ? <ActivityIndicator color={Colors.black} /> : (
-                <>
-                  <MaterialIcons name="check-circle" size={18} color={Colors.black} />
-                  <Text style={styles.ctaBtnText}>Start My 30-Day Qualification</Text>
-                </>
+              {enrolling ? <ActivityIndicator color="#061006" /> : (
+                <Text style={styles.ctaBtnText}>Start My 30-Day Qualification</Text>
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.backLink} onPress={() => { setLandingStep(0); setScreen('landing'); }}>
+            <TouchableOpacity style={styles.backLink}
+              onPress={() => { setLandingStep(0); setScreen('landing'); }}>
               <Text style={styles.backLinkText}>Back</Text>
             </TouchableOpacity>
             <View style={{ height: 40 }} />
@@ -494,109 +479,403 @@ export default function AcquisitionProgramScreen() {
         </KeyboardAvoidingView>
       )}
 
-      {/* ── QUALIFYING ── */}
-      {screen === 'qualifying' && participant && (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-          <View style={[styles.statusBanner, windowExpired && styles.statusBannerWarning]}>
-            <MaterialIcons name={windowExpired ? 'timer-off' : 'schedule'} size={16} color={windowExpired ? Colors.warning : Colors.primary} />
-            <Text style={[styles.statusBannerText, windowExpired && { color: Colors.warning }]}>
-              {windowExpired
-                ? 'Your 30-day window has expired — enroll again to start a new attempt.'
-                : `Qualifying · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining`}
-            </Text>
-          </View>
-
-          <View style={styles.progressCard}>
-            <Text style={styles.progressLabel}>Customer Acquisition Progress</Text>
-            <View style={styles.progressNumbers}>
-              <Text style={styles.progressCurrent}>{qualCount}</Text>
-              <Text style={styles.progressSep}>/</Text>
-              <Text style={styles.progressTarget}>76 Customers</Text>
-            </View>
-            <View style={styles.progressBarTrack}>
-              <View style={[styles.progressBarFill, { width: `${qualProgress * 100}%` }]} />
-            </View>
-            <View style={styles.progressMeta}>
-              <Text style={styles.progressMetaText}>{76 - qualCount} customers remaining</Text>
-              <Text style={styles.progressMetaText}>{windowExpired ? 'Window expired' : `${daysLeft}d left`}</Text>
-            </View>
-          </View>
-
-          <ReferralCard code={participant.referral_code} copied={copiedCode} onCopy={copyCode} onShare={shareCode} />
-
-          {windowExpired ? (
-            <TouchableOpacity style={styles.reEnrollBtn} onPress={handleReEnroll} activeOpacity={0.85}>
-              <MaterialIcons name="refresh" size={18} color={Colors.black} />
-              <Text style={styles.reEnrollText}>Enroll Again (Reset 0/76)</Text>
+      {/* ── DASHBOARD ── */}
+      {screen === 'dashboard' && participant && (
+        <View style={{ flex: 1 }}>
+          {/* Tabs */}
+          <View style={styles.tabsRow}>
+            <TouchableOpacity
+              style={[styles.tabBtn, dashTab === 'proving' && styles.tabBtnActive]}
+              onPress={async () => { await Haptics.selectionAsync(); setDashTab('proving'); }}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.tabBtnText, dashTab === 'proving' && styles.tabBtnTextActive]}>
+                Proving yourself
+              </Text>
             </TouchableOpacity>
-          ) : null}
-
-          <PitchLibrarySection pitches={pitches} expanded={pitchExpanded} onToggle={setPitchExpanded} />
-          <View style={{ height: 40 }} />
-        </ScrollView>
-      )}
-
-      {/* ── PENDING REVIEW ── */}
-      {screen === 'pending_review' && participant && (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-          <View style={styles.heroCard}>
-            <View style={[styles.heroIcon, { backgroundColor: Colors.warningMuted }]}>
-              <MaterialIcons name="pending" size={36} color={Colors.warning} />
-            </View>
-            <Text style={styles.heroTitle}>Pending Eligibility Review</Text>
-            <Text style={styles.heroSub}>
-              You have reached 76 / 76. The NumVault team is reviewing your acquisition history before unlocking the paid Lead invitation. This typically takes 1–3 business days.
-            </Text>
+            <TouchableOpacity
+              style={[styles.tabBtn, dashTab === 'onteam' && styles.tabBtnActive]}
+              onPress={async () => {
+                await Haptics.selectionAsync();
+                setDashTab('onteam');
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.tabBtnText, dashTab === 'onteam' && styles.tabBtnTextActive]}>
+                On the team
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.progressCard}>
-            <Text style={styles.progressLabel}>Customer Acquisition Progress</Text>
-            <View style={styles.progressNumbers}>
-              <Text style={styles.progressCurrent}>76</Text>
-              <Text style={styles.progressSep}>/</Text>
-              <Text style={[styles.progressTarget, { color: Colors.warning }]}>76 Customers ✓</Text>
-            </View>
-            <View style={styles.progressBarTrack}>
-              <View style={[styles.progressBarFill, { width: '100%', backgroundColor: Colors.warning }]} />
-            </View>
+          <View style={{ flex: 1 }}>
+            {/* Lock overlay for "On the team" if not qualified */}
+            {dashTab === 'onteam' && !isQualified ? (
+              <View style={styles.lockOverlay}>
+                <View style={styles.lockIconWrap}>
+                  <MaterialIcons name="lock" size={26} color="#4ade80" />
+                </View>
+                <Text style={styles.lockTitle}>Staff Dashboard</Text>
+                <Text style={styles.lockSub}>
+                  Unlocks once you complete your referral challenge. Your referral code is
+                </Text>
+                <View style={styles.lockCodeBox}>
+                  <Text style={styles.lockCode}>{participant.referral_code}</Text>
+                  <Text style={styles.lockBrand}>NumVault</Text>
+                </View>
+                <Text style={styles.lockSub2}>Keep sharing your code. You have got this.</Text>
+                <TouchableOpacity style={styles.lockBtn}
+                  onPress={async () => { await Haptics.selectionAsync(); setDashTab('proving'); }}
+                  activeOpacity={0.85}>
+                  <Text style={styles.lockBtnText}>Back to my challenge</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 40 }}>
+
+                {/* ── PROVING YOURSELF tab ── */}
+                {dashTab === 'proving' && (
+                  <>
+                    {/* Top card */}
+                    <View style={styles.topCard}>
+                      <View style={styles.topCardTop}>
+                        <View style={styles.topCardLeft}>
+                          <Text style={styles.topCardLabel}>Your proving ground</Text>
+                          <Text style={styles.topCardHeadline}>
+                            Earn your <Text style={{ color: '#4ade80' }}>invite</Text>
+                          </Text>
+                          <Text style={styles.topCardSub}>76 customers. Unlock your income.</Text>
+                        </View>
+                        <View style={styles.topCardRight}>
+                          <Text style={styles.topCardLabel}>If you join us, you will earn</Text>
+                          <Text style={styles.topCardBig}>₦600,000</Text>
+                          <Text style={styles.topCardBigSub}>over your 6-month contract</Text>
+                        </View>
+                      </View>
+                      <View style={styles.topCardDivider} />
+                      <View style={styles.topCardBottom}>
+                        <View style={styles.topCardStat}>
+                          <View style={styles.statIcon}>
+                            <MaterialIcons name="schedule" size={15} color="#4ade80" />
+                          </View>
+                          <View>
+                            <Text style={styles.statLabel}>Your progress so far</Text>
+                            <Text style={styles.statVal}>{qualCount} / 76</Text>
+                          </View>
+                        </View>
+                        <View style={[styles.topCardStat, styles.topCardStatBorder]}>
+                          <View style={styles.statIcon}>
+                            <MaterialIcons name="calendar-today" size={15} color="#4ade80" />
+                          </View>
+                          <View>
+                            <Text style={styles.statLabel}>What you unlock at 76</Text>
+                            <Text style={styles.statValGreen}>₦100,000/month</Text>
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Requirements collapsible */}
+                    <View style={styles.scard}>
+                      <TouchableOpacity style={styles.scardHdr}
+                        onPress={async () => { await Haptics.selectionAsync(); setReqOpen(!reqOpen); }}
+                        activeOpacity={0.8}>
+                        <View style={styles.scardIcon}>
+                          <MaterialIcons name="event-note" size={16} color="#4ade80" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.scardTitle}>Your 30-day challenge</Text>
+                          <Text style={styles.scardSub}>Tap to see how it works</Text>
+                        </View>
+                        <MaterialIcons
+                          name={reqOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-right'}
+                          size={20} color="#4a7a4a" />
+                      </TouchableOpacity>
+                      {reqOpen ? (
+                        <View style={styles.scardBody}>
+                          <Text style={styles.reqIntro}>
+                            You have <Text style={{ color: '#fff', fontWeight: '600' }}>30 days</Text> to refer 76 paying customers.{' '}
+                            <Text style={{ color: '#4ade80', fontWeight: '600' }}>{qualCount}/76</Text> done —{' '}
+                            <Text style={{ color: '#4a7a4a' }}>{Math.max(0, 76 - qualCount)} to go.</Text>
+                          </Text>
+                          {QUAL_RULES.map((r, i) => (
+                            <View key={i} style={styles.ruleRow}>
+                              <View style={styles.ruleDot} />
+                              <Text style={styles.ruleText}>{r}</Text>
+                            </View>
+                          ))}
+                          <View style={styles.scardDivider} />
+                          <Text style={styles.reqQ}>What counts as a successful referral?</Text>
+                          <View style={styles.vbox}>
+                            <Text style={styles.vboxTitle}>Your referral counts when all 3 happen</Text>
+                            <Text style={styles.vboxBody}>
+                              {'1. They sign up using your referral code\n2. They buy at least one number\n3. Their order goes through successfully'}
+                            </Text>
+                            <Text style={styles.vboxNote}>Just signing up is not enough — they need to actually make a purchase.</Text>
+                          </View>
+                        </View>
+                      ) : null}
+                    </View>
+                  </>
+                )}
+
+                {/* ── ON THE TEAM tab ── */}
+                {dashTab === 'onteam' && isQualified && (
+                  <>
+                    {/* Top card */}
+                    <View style={styles.topCard}>
+                      <View style={styles.topCardTop}>
+                        <View style={styles.topCardLeft}>
+                          <Text style={styles.topCardLabel}>You are on the team</Text>
+                          <Text style={styles.topCardHeadline}>
+                            {monthsRemaining} months <Text style={{ color: '#4ade80' }}>remaining</Text>
+                          </Text>
+                          <Text style={styles.topCardSub}>Make the most of your time with us.</Text>
+                        </View>
+                        <View style={styles.topCardRight}>
+                          <Text style={styles.topCardLabel}>Your total potential</Text>
+                          <Text style={styles.topCardBig}>₦{potentialRemaining.toLocaleString()}</Text>
+                          <Text style={styles.topCardBigSub}>remaining potential</Text>
+                        </View>
+                      </View>
+                      <View style={styles.topCardDivider} />
+                      <View style={styles.topCardBottom}>
+                        <View style={styles.topCardStat}>
+                          <View style={styles.statIcon}>
+                            <MaterialIcons name="schedule" size={15} color="#4ade80" />
+                          </View>
+                          <View>
+                            <Text style={styles.statLabel}>Customers this month</Text>
+                            <Text style={styles.statVal}>{qualCount} / 76</Text>
+                          </View>
+                        </View>
+                        <View style={[styles.topCardStat, styles.topCardStatBorder]}>
+                          <View style={styles.statIcon}>
+                            <MaterialIcons name="payments" size={15} color="#4ade80" />
+                          </View>
+                          <View>
+                            <Text style={styles.statLabel}>Earned this month</Text>
+                            <Text style={styles.statValGreen}>
+                              ₦{Math.round(100000 * Math.min(qualCount, 76) / 76).toLocaleString()}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Requirements collapsible (paid rules) */}
+                    <View style={styles.scard}>
+                      <TouchableOpacity style={styles.scardHdr}
+                        onPress={async () => { await Haptics.selectionAsync(); setReqOpen(!reqOpen); }}
+                        activeOpacity={0.8}>
+                        <View style={styles.scardIcon}>
+                          <MaterialIcons name="event-note" size={16} color="#4ade80" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.scardTitle}>Your monthly target — 30 days</Text>
+                          <Text style={styles.scardSub}>Tap to see how it works</Text>
+                        </View>
+                        <MaterialIcons
+                          name={reqOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-right'}
+                          size={20} color="#4a7a4a" />
+                      </TouchableOpacity>
+                      {reqOpen ? (
+                        <View style={styles.scardBody}>
+                          {PAID_RULES.map((r, i) => (
+                            <View key={i} style={styles.ruleRow}>
+                              <View style={styles.ruleDot} />
+                              <Text style={styles.ruleText}>{r}</Text>
+                            </View>
+                          ))}
+                          <View style={styles.scardDivider} />
+                          <View style={styles.payNotice}>
+                            <Text style={styles.payNoticeTitle}>How your pay works</Text>
+                            <Text style={styles.payNoticeBody}>
+                              <Text style={{ color: '#4ade80' }}>①</Text> Your 30-day period starts now.{'\n'}
+                              <Text style={{ color: '#4ade80' }}>②</Text> At the end of 30 days we count your customers and pay you. You earn ₦100,000 for a full 76 — in two batches of ₦50,000 — one at 38 customers and one at 76. Both can land in one day if you hit 76 quickly.{'\n'}
+                              <Text style={{ color: '#4ade80' }}>③</Text> If you do not meet your target you will be downgraded to proving yourself again.
+                            </Text>
+                          </View>
+                        </View>
+                      ) : null}
+                    </View>
+                  </>
+                )}
+
+                {/* ── CYCLES (both tabs) ── */}
+                <View style={styles.cycWrap}>
+                  {/* Cycle 1 — First half */}
+                  <View style={styles.cycRow}>
+                    <View style={styles.cycIcon}>
+                      <MaterialIcons name="people" size={16} color="#4ade80" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.cycMeta}>
+                        <View>
+                          <Text style={styles.cycName}>First half</Text>
+                          <Text style={styles.cycCt}>{c1} / 38</Text>
+                          {dashTab === 'onteam' && isQualified ? (
+                            <Text style={styles.cycEarn}>
+                              Earned ₦{Math.round(50000 * c1 / 38).toLocaleString()} / ₦50,000 max
+                            </Text>
+                          ) : null}
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={styles.cycRange}>customers 1–38</Text>
+                          <Text style={styles.cycPct}>{Math.round(c1 / 38 * 100)}%</Text>
+                        </View>
+                      </View>
+                      <SegBar filled={c1} total={38} />
+                      <View style={styles.barFt}>
+                        <Text style={styles.barFtTxt}>0</Text>
+                        <Text style={styles.barFtTxt}>38</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Cycle 2 — Second half (dropdown) */}
+                  <TouchableOpacity style={styles.cyc2Trigger}
+                    onPress={async () => { await Haptics.selectionAsync(); setC2Open(!c2Open); }}
+                    activeOpacity={0.8}>
+                    <View style={[styles.cycIcon, { width: 32, height: 32 }]}>
+                      <MaterialIcons name="people" size={14} color="#4ade80" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cyc2Label}>Second half</Text>
+                      <Text style={styles.cyc2Sub}>{c2} / 38 · customers 39–76</Text>
+                    </View>
+                    <MaterialIcons
+                      name={c2Open ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
+                      size={18} color="#4a7a4a" />
+                  </TouchableOpacity>
+
+                  {c2Open ? (
+                    <View style={styles.cyc2Body}>
+                      <View style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
+                        <View style={styles.cycMeta}>
+                          <View>
+                            <Text style={styles.cycCt}>{c2} / 38</Text>
+                            {dashTab === 'onteam' && isQualified ? (
+                              <Text style={styles.cycEarn}>
+                                Earned ₦{Math.round(50000 * c2 / 38).toLocaleString()} / ₦50,000 max
+                              </Text>
+                            ) : null}
+                          </View>
+                          <Text style={styles.cycPct}>{Math.round(c2 / 38 * 100)}%</Text>
+                        </View>
+                        <SegBar filled={c2} total={38} />
+                        <View style={styles.barFt}>
+                          <Text style={styles.barFtTxt}>39</Text>
+                          <Text style={styles.barFtTxt}>76</Text>
+                        </View>
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* Referral card */}
+                <View style={styles.refCard}>
+                  <View style={styles.refTop}>
+                    <View style={styles.refIcon}>
+                      <MaterialIcons name="link" size={16} color="#4ade80" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.refLabel}>Your referral code</Text>
+                      <Text style={styles.refCode}>{participant.referral_code}</Text>
+                    </View>
+                    <TouchableOpacity style={styles.copyBtn} onPress={copyCode} activeOpacity={0.7}>
+                      <MaterialIcons name={copiedCode ? 'check' : 'content-copy'} size={14} color="#4ade80" />
+                      <Text style={styles.copyBtnText}>{copiedCode ? 'Copied!' : 'Copy'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity style={styles.shareBtn} onPress={shareCode} activeOpacity={0.85}>
+                    <MaterialIcons name="share" size={15} color="#061006" />
+                    <Text style={styles.shareBtnText}>Share referral code</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Window expired re-enroll */}
+                {windowExpired && dashTab === 'proving' ? (
+                  <View style={{ paddingHorizontal: 16 }}>
+                    <TouchableOpacity style={styles.reEnrollBtn} onPress={handleReEnroll} activeOpacity={0.85}>
+                      <MaterialIcons name="refresh" size={18} color="#061006" />
+                      <Text style={styles.reEnrollText}>Enroll Again (Reset 0/76)</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+
+                {/* Pitch library */}
+                {pitches.length > 0 ? (
+                  <View style={styles.pitchWrap}>
+                    <TouchableOpacity style={styles.pitchHdr}
+                      onPress={async () => { await Haptics.selectionAsync(); setPitchOpen(!pitchOpen); }}
+                      activeOpacity={0.8}>
+                      <View style={styles.cycIcon}>
+                        <MaterialIcons name="chat-bubble-outline" size={16} color="#4ade80" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.pitchTitle}>How to talk about NumVault</Text>
+                      </View>
+                      <MaterialIcons
+                        name={pitchOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
+                        size={18} color="#4a7a4a" />
+                    </TouchableOpacity>
+                    {pitchOpen ? (
+                      <View style={styles.pitchBody}>
+                        {pitches.map((p) => (
+                          <View key={p.id} style={styles.pitchItem}>
+                            <View style={styles.piIcon}>
+                              <MaterialIcons name="person" size={14} color="#4ade80" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <View style={styles.piTag}>
+                                <Text style={styles.piTagText}>{p.audience}</Text>
+                              </View>
+                              <Text style={styles.pitchHeadline}>{p.headline}</Text>
+                              <Text style={styles.pitchBodyTxt}>{p.body}</Text>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {/* Payout history (on the team only) */}
+                {dashTab === 'onteam' && isQualified && payouts.length > 0 ? (
+                  <View style={{ paddingHorizontal: 16, gap: 8 }}>
+                    <Text style={styles.payoutSectionTitle}>Payout History</Text>
+                    {payouts.map((pout) => (
+                      <View key={pout.id} style={styles.payoutRow}>
+                        <View style={[styles.payoutIconWrap, {
+                          backgroundColor: pout.status === 'sent' ? '#0d2a0d' : pout.status === 'failed' ? '#2a0d0d' : '#111a11'
+                        }]}>
+                          <MaterialIcons
+                            name={pout.status === 'sent' ? 'check-circle' : pout.status === 'failed' ? 'error' : 'pending'}
+                            size={16}
+                            color={pout.status === 'sent' ? '#4ade80' : pout.status === 'failed' ? '#f87171' : '#4a7a4a'}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.payoutLabel}>
+                            Cycle {pout.cycle_number} · {new Date(pout.monthly_window_start).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })}
+                          </Text>
+                          <Text style={styles.payoutMeta}>
+                            {pout.status === 'sent' ? `Sent ${new Date(pout.sent_at!).toLocaleDateString()}` :
+                              pout.status === 'failed' ? (pout.failure_reason || 'Transfer failed') : 'Pending transfer'}
+                          </Text>
+                        </View>
+                        <Text style={[styles.payoutAmount, { color: pout.status === 'sent' ? '#4ade80' : '#fff' }]}>
+                          ₦{Number(pout.amount).toLocaleString()}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+              </ScrollView>
+            )}
           </View>
-
-          <ReferralCard code={participant.referral_code} copied={copiedCode} onCopy={copyCode} onShare={shareCode} />
-
-          <SectionCard title="What Happens Next" icon="schedule">
-            <HighlightRow icon="manage-search" label="Admin reviews your 76 customers" sub="Checking for distinct accounts and genuine purchases" />
-            <HighlightRow icon="check-circle" label="Approval → Paid Lead invitation" sub="You will be notified and asked to complete onboarding" />
-            <HighlightRow icon="block" label="Rejection → Frozen at 76/76" sub="You can remain in review/appeal until resolved" />
-          </SectionCard>
-          <View style={{ height: 40 }} />
-        </ScrollView>
-      )}
-
-      {/* ── ELIGIBLE ── */}
-      {screen === 'eligible' && participant && (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-          <View style={styles.heroCard}>
-            <View style={[styles.heroIcon, { backgroundColor: Colors.successMuted }]}>
-              <MaterialIcons name="verified" size={36} color={Colors.success} />
-            </View>
-            <Text style={styles.heroTitle}>Eligibility Approved!</Text>
-            <Text style={styles.heroSub}>
-              Congratulations — you qualified for the paid NumVault Lead opportunity. Set up your bank account to receive payouts.
-            </Text>
-          </View>
-
-          <SectionCard title="Your Paid Lead Opportunity" icon="emoji-events">
-            <HighlightRow icon="payments" label="₦50,000 per completed cycle" sub="Each cycle = 38 validated customers" />
-            <HighlightRow icon="calendar-today" label="Up to ₦100,000/month" sub="Maximum 2 cycles per calendar month" />
-            <HighlightRow icon="event-available" label="6 monthly windows" sub="₦600,000 maximum total over the program" />
-          </SectionCard>
-
-          <TouchableOpacity style={styles.ctaBtn} onPress={() => setScreen('bank_onboarding')} activeOpacity={0.85}>
-            <MaterialIcons name="account-balance" size={18} color={Colors.black} />
-            <Text style={styles.ctaBtnText}>Set Up Bank Account</Text>
-          </TouchableOpacity>
-          <View style={{ height: 40 }} />
-        </ScrollView>
+        </View>
       )}
 
       {/* ── BANK ONBOARDING ── */}
@@ -604,56 +883,65 @@ export default function AcquisitionProgramScreen() {
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             <View style={styles.heroCard}>
-              <View style={[styles.heroIcon, { backgroundColor: Colors.primaryMuted }]}>
-                <MaterialIcons name="account-balance" size={36} color={Colors.primary} />
+              <View style={[styles.heroIcon, { backgroundColor: '#0d2a0d' }]}>
+                <MaterialIcons name="account-balance" size={36} color="#4ade80" />
               </View>
-              <Text style={styles.heroTitle}>Bank Account Setup</Text>
-              <Text style={styles.heroSub}>This account will receive your Lead payouts of ₦50,000 per completed cycle.</Text>
+              <Text style={styles.heroTitle}>Set up your payout</Text>
+              <Text style={styles.heroSub}>
+                Almost there. Add your bank details so we can pay you directly. We will verify your account name through Paystack to make sure everything is correct.
+              </Text>
+            </View>
+
+            {/* How your pay works notice */}
+            <View style={styles.payNotice}>
+              <Text style={styles.payNoticeTitle}>How your pay works</Text>
+              <Text style={styles.payNoticeBody}>
+                <Text style={{ color: '#4ade80' }}>①</Text> Your 30-day period starts now.{'\n'}
+                <Text style={{ color: '#4ade80' }}>②</Text> At the end of 30 days we count your customers and pay you — whether that is 1, 38, or the full 76. You earn ₦100,000 for a full 76 in two batches of ₦50,000.{'\n'}
+                <Text style={{ color: '#4ade80' }}>③</Text> You keep access to your Staff Dashboard. But if you do not meet your target you will be downgraded to proving yourself again.
+              </Text>
             </View>
 
             <View style={styles.formCard}>
-              <Text style={styles.formLabel}>Account Number</Text>
-              <TextInput
-                style={styles.formInput}
-                value={bankAccountNumber}
-                onChangeText={(t) => { setBankAccountNumber(t.replace(/\D/g, '').slice(0, 10)); setResolvedAccountName(null); }}
-                placeholder="10-digit account number"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="number-pad"
-                maxLength={10}
-              />
-
-              <Text style={[styles.formLabel, { marginTop: Spacing.md }]}>Bank</Text>
-              <TouchableOpacity style={[styles.formInput, { justifyContent: 'center' }]} onPress={() => setShowBankPicker(true)} activeOpacity={0.8}>
-                <Text style={{ color: selectedBank ? Colors.text : Colors.textMuted, fontSize: FontSize.md }}>
+              <Text style={styles.formLabel}>Bank</Text>
+              <TouchableOpacity style={[styles.formInput, { justifyContent: 'center' }]}
+                onPress={() => setShowBankPicker(true)} activeOpacity={0.8}>
+                <Text style={{ color: selectedBank ? '#fff' : '#3a6a3a', fontSize: 14 }}>
                   {selectedBank ? selectedBank.name : 'Select your bank'}
                 </Text>
               </TouchableOpacity>
 
+              <Text style={[styles.formLabel, { marginTop: Spacing.md }]}>Account Number</Text>
+              <TextInput
+                style={styles.formInput}
+                value={bankAccountNumber}
+                onChangeText={(t) => { setBankAccountNumber(t.replace(/\D/g, '').slice(0, 10)); setResolvedAccountName(null); }}
+                placeholder="Enter 10-digit account number"
+                placeholderTextColor="#3a6a3a"
+                keyboardType="number-pad"
+                maxLength={10}
+              />
+
               {bankAccountNumber.length === 10 && selectedBank ? (
                 <TouchableOpacity
-                  style={[styles.ctaBtn, { marginTop: Spacing.md }, resolvingAccount && styles.ctaBtnDisabled]}
+                  style={[styles.lookupBtn, resolvingAccount && { opacity: 0.5 }]}
                   onPress={resolveAccount}
                   disabled={resolvingAccount}
                   activeOpacity={0.85}
                 >
-                  {resolvingAccount ? <ActivityIndicator color={Colors.black} /> : (
-                    <>
-                      <MaterialIcons name="verified-user" size={18} color={Colors.black} />
-                      <Text style={styles.ctaBtnText}>Verify Account</Text>
-                    </>
-                  )}
+                  <Text style={styles.lookupBtnText}>
+                    {resolvingAccount ? 'Verifying...' : 'Verify my account name'}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
 
               {resolvedAccountName ? (
-                <View style={[styles.statusBanner, { marginTop: Spacing.md }]}>
-                  <MaterialIcons name="check-circle" size={16} color={Colors.primary} />
-                  <Text style={styles.statusBannerText}>{resolvedAccountName}</Text>
+                <View style={styles.nameResult}>
+                  <Text style={styles.nameResultLabel}>Account holder name</Text>
+                  <Text style={styles.nameResultVal}>{resolvedAccountName}</Text>
+                  <Text style={styles.nameResultSub}>Is this you? If yes, confirm below.</Text>
                 </View>
               ) : null}
-
-              <Text style={styles.formHint}>Must be in your name. Payouts are transferred directly to this account.</Text>
             </View>
 
             <TouchableOpacity
@@ -662,25 +950,23 @@ export default function AcquisitionProgramScreen() {
               disabled={!resolvedAccountName || savingBank}
               activeOpacity={0.85}
             >
-              {savingBank ? <ActivityIndicator color={Colors.black} /> : (
-                <>
-                  <MaterialIcons name="save" size={18} color={Colors.black} />
-                  <Text style={styles.ctaBtnText}>Save Bank Details</Text>
-                </>
+              {savingBank ? <ActivityIndicator color="#061006" /> : (
+                <Text style={styles.ctaBtnText}>Confirm and unlock Staff Dashboard</Text>
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.backLink} onPress={() => setScreen('eligible')}>
+            <TouchableOpacity style={styles.backLink} onPress={() => setScreen('dashboard')}>
               <Text style={styles.backLinkText}>Back</Text>
             </TouchableOpacity>
             <View style={{ height: 40 }} />
           </ScrollView>
 
+          {/* Bank picker modal */}
           <Modal visible={showBankPicker} animationType="slide" onRequestClose={() => setShowBankPicker(false)}>
             <View style={[styles.container, { paddingTop: insets.top }]}>
               <View style={styles.header}>
                 <TouchableOpacity style={styles.backBtn} onPress={() => setShowBankPicker(false)} activeOpacity={0.7}>
-                  <MaterialIcons name="close" size={22} color={Colors.text} />
+                  <MaterialIcons name="close" size={22} color="#4ade80" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Select Bank</Text>
                 <View style={{ width: 36 }} />
@@ -688,7 +974,7 @@ export default function AcquisitionProgramScreen() {
               <ScrollView showsVerticalScrollIndicator={false}>
                 {bankList.length === 0 ? (
                   <View style={[styles.center, { padding: Spacing.xl }]}>
-                    <ActivityIndicator color={Colors.primary} />
+                    <ActivityIndicator color="#4ade80" />
                     <Text style={[styles.formHint, { marginTop: Spacing.sm }]}>Loading banks...</Text>
                   </View>
                 ) : (
@@ -699,8 +985,8 @@ export default function AcquisitionProgramScreen() {
                       onPress={() => { setSelectedBank(bank); setResolvedAccountName(null); setShowBankPicker(false); }}
                       activeOpacity={0.8}
                     >
-                      <Text style={[styles.bankName, selectedBank?.code === bank.code && { color: Colors.primary }]}>{bank.name}</Text>
-                      {selectedBank?.code === bank.code ? <MaterialIcons name="check" size={16} color={Colors.primary} /> : null}
+                      <Text style={[styles.bankName, selectedBank?.code === bank.code && { color: '#4ade80' }]}>{bank.name}</Text>
+                      {selectedBank?.code === bank.code ? <MaterialIcons name="check" size={16} color="#4ade80" /> : null}
                     </TouchableOpacity>
                   ))
                 )}
@@ -709,299 +995,371 @@ export default function AcquisitionProgramScreen() {
           </Modal>
         </KeyboardAvoidingView>
       )}
-
-      {/* ── ACTIVE LEAD ── */}
-      {screen === 'active_lead' && participant && cycleProgress && (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-          <View style={[styles.statusBanner, { borderColor: Colors.success }]}>
-            <MaterialIcons name="star" size={16} color={Colors.success} />
-            <Text style={[styles.statusBannerText, { color: Colors.success }]}>
-              Active NumVault Lead · {cycleProgress.monthLabel}
-            </Text>
-          </View>
-
-          <CycleCard
-            cycleNum={1} count={cycleProgress.cycle1Count} complete={cycleProgress.cycle1Complete}
-            payout={payouts.find((p) => p.cycle_number === 1 && p.monthly_window_start === cycleProgress.windowStart)}
-          />
-          {cycleProgress.cycle1Complete ? (
-            <CycleCard
-              cycleNum={2} count={cycleProgress.cycle2Count} complete={cycleProgress.cycle2Complete}
-              payout={payouts.find((p) => p.cycle_number === 2 && p.monthly_window_start === cycleProgress.windowStart)}
-            />
-          ) : null}
-
-          <ReferralCard code={participant.referral_code} copied={copiedCode} onCopy={copyCode} onShare={shareCode} />
-
-          {payouts.length > 0 ? (
-            <View style={styles.payoutSection}>
-              <Text style={styles.sectionHeader2}>Payout History</Text>
-              {payouts.map((pout) => (
-                <View key={pout.id} style={styles.payoutRow}>
-                  <View style={[styles.payoutIcon, { backgroundColor: pout.status === 'sent' ? Colors.successMuted : pout.status === 'failed' ? Colors.errorMuted : Colors.primaryMuted }]}>
-                    <MaterialIcons
-                      name={pout.status === 'sent' ? 'check-circle' : pout.status === 'failed' ? 'error' : 'pending'}
-                      size={16}
-                      color={pout.status === 'sent' ? Colors.success : pout.status === 'failed' ? Colors.error : Colors.primary}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.payoutLabel}>Cycle {pout.cycle_number} · {getMonthWindowLabel(pout.monthly_window_start)}</Text>
-                    <Text style={styles.payoutMeta}>
-                      {pout.status === 'sent' ? `Sent ${new Date(pout.sent_at!).toLocaleDateString()}` : pout.status === 'failed' ? (pout.failure_reason || 'Transfer failed') : 'Pending transfer'}
-                    </Text>
-                  </View>
-                  <Text style={[styles.payoutAmount, { color: pout.status === 'sent' ? Colors.success : Colors.text }]}>
-                    ₦{Number(pout.amount).toLocaleString()}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-
-          <PitchLibrarySection pitches={pitches} expanded={pitchExpanded} onToggle={setPitchExpanded} />
-          <View style={{ height: 40 }} />
-        </ScrollView>
-      )}
     </View>
   );
 }
+
+// ── Segmented bar component ────────────────────────────────────────────────────
+
+function SegBar({ filled, total }: { filled: number; total: number }) {
+  const segments = Array.from({ length: total }, (_, i) => i < filled);
+  return (
+    <View style={segStyles.bar}>
+      {segments.map((on, i) => (
+        <View key={i} style={[segStyles.seg, on && segStyles.segOn]} />
+      ))}
+    </View>
+  );
+}
+
+const segStyles = StyleSheet.create({
+  bar: { flexDirection: 'row', gap: 2, height: 8, marginVertical: 4 },
+  seg: { flex: 1, borderRadius: 2, backgroundColor: '#1a3a1a' },
+  segOn: { backgroundColor: '#4ade80' },
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function isWithin30Days(dateStr: string | null | undefined): boolean {
   if (!dateStr) return false;
-  const start = new Date(dateStr).getTime();
-  return Date.now() < start + 30 * 24 * 60 * 60 * 1000;
+  return Date.now() < new Date(dateStr).getTime() + 30 * 24 * 60 * 60 * 1000;
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 
-function SectionCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.sectionCard}>
-      <View style={styles.sectionCardHeader}>
-        <MaterialIcons name={icon as any} size={16} color={Colors.primary} />
-        <Text style={styles.sectionCardTitle}>{title}</Text>
-      </View>
-      <View style={styles.sectionCardBody}>{children}</View>
-    </View>
-  );
-}
-
-function HighlightRow({ icon, label, sub }: { icon: string; label: string; sub: string }) {
-  return (
-    <View style={styles.highlightRow}>
-      <View style={styles.highlightIcon}>
-        <MaterialIcons name={icon as any} size={18} color={Colors.primary} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.highlightLabel}>{label}</Text>
-        <Text style={styles.highlightSub}>{sub}</Text>
-      </View>
-    </View>
-  );
-}
-
-function ReferralCard({ code, copied, onCopy, onShare }: { code: string; copied: boolean; onCopy: () => void; onShare: () => void }) {
-  return (
-    <View style={styles.referralCard}>
-      <Text style={styles.referralTitle}>Your Referral Code</Text>
-      <View style={styles.referralCodeRow}>
-        <Text style={styles.referralCode}>{code}</Text>
-        <TouchableOpacity onPress={onCopy} style={styles.copyBtn} activeOpacity={0.7}>
-          <MaterialIcons name={copied ? 'check' : 'content-copy'} size={18} color={copied ? Colors.success : Colors.primary} />
-        </TouchableOpacity>
-      </View>
-      <Text style={styles.referralHint}>Ask customers to enter this code when they sign up on NumVault.</Text>
-      <TouchableOpacity style={styles.shareBtn} onPress={onShare} activeOpacity={0.85}>
-        <MaterialIcons name="share" size={16} color={Colors.black} />
-        <Text style={styles.shareBtnText}>Share Referral Code</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-function CycleCard({ cycleNum, count, complete, payout }: { cycleNum: 1 | 2; count: number; complete: boolean; payout?: LeadPayout }) {
-  const progress = Math.min(count / 38, 1);
-  return (
-    <View style={[styles.cycleCard, complete && styles.cycleCardComplete]}>
-      <View style={styles.cycleCardHeader}>
-        <Text style={styles.cycleCardTitle}>Cycle {cycleNum} of 2</Text>
-        {complete ? (
-          <View style={styles.cycleCompleteBadge}>
-            <MaterialIcons name="check-circle" size={12} color={Colors.success} />
-            <Text style={styles.cycleCompleteBadgeText}>Complete</Text>
-          </View>
-        ) : <Text style={styles.cycleActiveText}>In Progress</Text>}
-      </View>
-      <View style={styles.cycleNumbers}>
-        <Text style={styles.cycleCurrent}>{count}</Text>
-        <Text style={styles.cycleSep}>/</Text>
-        <Text style={styles.cycleTarget}>38 Customers</Text>
-      </View>
-      <View style={styles.progressBarTrack}>
-        <View style={[styles.progressBarFill, { width: `${progress * 100}%`, backgroundColor: complete ? Colors.success : Colors.primary }]} />
-      </View>
-      <View style={styles.cycleReward}>
-        <MaterialIcons name="payments" size={14} color={Colors.primary} />
-        <Text style={styles.cycleRewardText}>₦50,000 reward</Text>
-        {payout ? (
-          <View style={[styles.payoutStatusBadge, { backgroundColor: payout.status === 'sent' ? Colors.successMuted : Colors.primaryMuted }]}>
-            <Text style={[styles.payoutStatusText, { color: payout.status === 'sent' ? Colors.success : Colors.primary }]}>
-              {payout.status === 'sent' ? 'Paid' : payout.status === 'failed' ? 'Failed' : 'Pending'}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-function PitchLibrarySection({ pitches, expanded, onToggle }: { pitches: PitchItem[]; expanded: string | null; onToggle: (id: string | null) => void }) {
-  if (pitches.length === 0) return null;
-  return (
-    <View style={styles.pitchSection}>
-      <Text style={styles.sectionHeader2}>Pitch Library</Text>
-      <Text style={styles.pitchSub}>Ready-to-use talking points for different customer situations.</Text>
-      {pitches.map((p) => {
-        const open = expanded === p.id;
-        return (
-          <TouchableOpacity key={p.id} style={[styles.pitchCard, open && styles.pitchCardOpen]} onPress={() => onToggle(open ? null : p.id)} activeOpacity={0.8}>
-            <View style={styles.pitchCardHeader}>
-              <View style={styles.pitchAudienceBadge}><Text style={styles.pitchAudience}>{p.audience}</Text></View>
-              <MaterialIcons name={open ? 'expand-less' : 'expand-more'} size={20} color={Colors.textSecondary} />
-            </View>
-            <Text style={styles.pitchHeadline}>{p.headline}</Text>
-            {open ? <Text style={styles.pitchBody}>{p.body}</Text> : null}
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-}
-
-function getMonthWindowLabel(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' });
-}
-
-// ── Styles ─────────────────────────────────────────────────────────────────────
+const BG = '#0a0d0a';
+const SURFACE = '#0d1f0d';
+const BORDER = '#1a3a1a';
+const BORDER2 = '#1e3a1e';
+const GREEN = '#4ade80';
+const MUTED = '#4a7a4a';
+const MUTED2 = '#3a6a3a';
+const TEXT = '#fff';
+const TEXT2 = '#a0c0a0';
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  // generic
+  accent: { color: GREEN },
+  container: { flex: 1, backgroundColor: BG },
   center: { alignItems: 'center', justifyContent: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md },
-  backBtn: { width: 36, height: 36, borderRadius: Radius.md, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { color: Colors.text, fontSize: FontSize.lg, fontWeight: FontWeight.bold },
-  content: { padding: Spacing.lg, gap: Spacing.lg },
 
-  landingPage: { width: SCREEN_WIDTH, padding: Spacing.lg, paddingTop: Spacing.xl, gap: Spacing.lg },
-  landingIconRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  landingIconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.primaryMuted, borderWidth: 1, borderColor: 'rgba(0,200,83,0.25)', alignItems: 'center', justifyContent: 'center' },
-  landingStepLabel: { color: Colors.primary, fontSize: FontSize.sm, fontWeight: FontWeight.bold, letterSpacing: 1.2, textTransform: 'uppercase' },
-  landingTitle: { color: Colors.text, fontSize: FontSize.xxl, fontWeight: FontWeight.bold, lineHeight: 32 },
-  landingBody: { color: Colors.textSecondary, fontSize: FontSize.md, lineHeight: 26 },
-  landingCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, padding: Spacing.md, gap: Spacing.xs },
-  landingFooter: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, gap: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.surfaceBorder, backgroundColor: Colors.background },
-  landingDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginBottom: Spacing.sm },
-  landingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.surfaceBorder },
-  landingDotActive: { width: 20, backgroundColor: Colors.primary },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 16,
+  },
+  backBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  headerTitle: { color: TEXT, fontSize: 20, fontWeight: '700' },
 
-  heroCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.xl, padding: Spacing.xl, alignItems: 'center', gap: Spacing.md },
-  heroIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.primaryMuted, borderWidth: 1, borderColor: 'rgba(0,200,83,0.25)', alignItems: 'center', justifyContent: 'center' },
-  heroTitle: { color: Colors.text, fontSize: FontSize.xl, fontWeight: FontWeight.bold, textAlign: 'center', lineHeight: 28 },
-  heroSub: { color: Colors.textSecondary, fontSize: FontSize.sm, textAlign: 'center', lineHeight: 22 },
+  // WELCOME OVERLAY
+  welcomeOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(5,10,5,0.96)', zIndex: 200,
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 32, paddingBottom: 40,
+  },
+  welcomeEmoji: { fontSize: 60, marginBottom: 20 },
+  welcomeTitle: { fontSize: 28, fontWeight: '700', color: GREEN, marginBottom: 12 },
+  welcomeSub: {
+    fontSize: 14, color: TEXT2, lineHeight: 24,
+    textAlign: 'center', maxWidth: 290, marginBottom: 28,
+  },
+  welcomeBtn: {
+    backgroundColor: GREEN, borderRadius: 100, paddingHorizontal: 48, paddingVertical: 15,
+  },
+  welcomeBtnText: { color: '#061006', fontSize: 15, fontWeight: '700' },
 
-  sectionCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, overflow: 'hidden' },
-  sectionCardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.surfaceBorder, backgroundColor: Colors.surfaceElevated },
-  sectionCardTitle: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
-  sectionCardBody: { padding: Spacing.lg, gap: Spacing.sm },
+  // LANDING
+  landingPage: {
+    width: SCREEN_WIDTH, padding: 20, paddingTop: 32, gap: 20,
+  },
+  landingIconRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  landingIconWrap: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: '#0d2a0d', borderWidth: 1, borderColor: '#1a5a1a',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  landingStepLabel: {
+    color: GREEN, fontSize: 11, fontWeight: '700',
+    letterSpacing: 1.2, textTransform: 'uppercase',
+  },
+  landingTitle: { color: TEXT, fontSize: 24, fontWeight: '700', lineHeight: 32 },
+  landingBody: { color: TEXT2, fontSize: 15, lineHeight: 26 },
+  landingFooter: {
+    paddingHorizontal: 20, paddingTop: 12, gap: 10,
+    borderTopWidth: 1, borderTopColor: BORDER, backgroundColor: BG,
+  },
+  landingDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginBottom: 4 },
+  landingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: BORDER },
+  landingDotActive: { width: 20, backgroundColor: GREEN },
 
-  highlightRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.surfaceBorder },
-  highlightIcon: { width: 36, height: 36, borderRadius: Radius.sm, backgroundColor: Colors.primaryMuted, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  highlightLabel: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  highlightSub: { color: Colors.textSecondary, fontSize: FontSize.xs, marginTop: 2 },
+  // TABS
+  tabsRow: {
+    flexDirection: 'row', marginHorizontal: 16, marginBottom: 14,
+    backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER2,
+    borderRadius: 100, padding: 4,
+  },
+  tabBtn: { flex: 1, paddingVertical: 10, borderRadius: 100, alignItems: 'center' },
+  tabBtnActive: { backgroundColor: '#1a3a1a' },
+  tabBtnText: { fontSize: 13, fontWeight: '500', color: MUTED },
+  tabBtnTextActive: { color: GREEN, fontWeight: '600' },
 
-  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, paddingVertical: 4 },
-  bulletText: { flex: 1, color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 20 },
+  // LOCK OVERLAY
+  lockOverlay: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 32, backgroundColor: BG,
+  },
+  lockIconWrap: {
+    width: 60, height: 60, borderRadius: 30,
+    backgroundColor: '#0d2a0d', borderWidth: 2, borderColor: '#1a5a1a',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+  },
+  lockTitle: { fontSize: 22, fontWeight: '700', color: TEXT, marginBottom: 8 },
+  lockSub: { fontSize: 13, color: MUTED, lineHeight: 22, textAlign: 'center', maxWidth: 260, marginBottom: 14 },
+  lockCodeBox: {
+    backgroundColor: '#0d2a0d', borderWidth: 1, borderColor: '#1a5a1a',
+    borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, marginBottom: 10,
+    alignItems: 'center',
+  },
+  lockCode: { fontSize: 22, fontWeight: '700', color: GREEN, letterSpacing: 3 },
+  lockBrand: { fontSize: 10, color: MUTED2, marginTop: 3 },
+  lockSub2: { fontSize: 12, color: MUTED2, marginBottom: 20 },
+  lockBtn: {
+    backgroundColor: '#1a5a2a', borderRadius: 100,
+    paddingHorizontal: 32, paddingVertical: 12,
+  },
+  lockBtnText: { color: GREEN, fontSize: 13, fontWeight: '600' },
 
-  ctaBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, backgroundColor: Colors.primary, borderRadius: Radius.md, height: 54 },
+  // TOP CARD
+  topCard: {
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 16, padding: 18, marginHorizontal: 16,
+  },
+  topCardTop: { flexDirection: 'row', marginBottom: 16 },
+  topCardLeft: { flex: 1, paddingRight: 16, borderRightWidth: 1, borderRightColor: BORDER },
+  topCardRight: { flex: 1, paddingLeft: 16 },
+  topCardLabel: { fontSize: 10, color: MUTED2, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 },
+  topCardHeadline: { fontSize: 22, fontWeight: '700', color: TEXT, lineHeight: 26, marginBottom: 6 },
+  topCardSub: { fontSize: 12, color: MUTED, lineHeight: 18 },
+  topCardBig: { fontSize: 28, fontWeight: '700', color: GREEN, lineHeight: 32, marginBottom: 4 },
+  topCardBigSub: { fontSize: 11, color: MUTED },
+  topCardDivider: { height: 1, backgroundColor: BORDER, marginBottom: 14 },
+  topCardBottom: { flexDirection: 'row' },
+  topCardStat: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  topCardStatBorder: { borderLeftWidth: 1, borderLeftColor: BORDER, paddingLeft: 14 },
+  statIcon: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: '#112011', borderWidth: 1, borderColor: '#1a4a1a',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  statLabel: { fontSize: 10, color: MUTED, marginBottom: 2 },
+  statVal: { fontSize: 18, fontWeight: '700', color: TEXT },
+  statValGreen: { fontSize: 15, fontWeight: '700', color: GREEN },
+
+  // SCARD (collapsible section)
+  scard: {
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 16, marginHorizontal: 16, overflow: 'hidden',
+  },
+  scardHdr: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  scardIcon: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#112011', borderWidth: 1, borderColor: '#1a4a1a',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  scardTitle: { fontSize: 14, fontWeight: '600', color: TEXT, marginBottom: 2 },
+  scardSub: { fontSize: 12, color: MUTED },
+  scardBody: { borderTopWidth: 1, borderTopColor: BORDER, padding: 14, gap: 8 },
+  scardDivider: { height: 1, backgroundColor: BORDER, marginVertical: 10 },
+
+  reqIntro: { fontSize: 12, color: TEXT2, lineHeight: 20, marginBottom: 6 },
+  reqQ: { fontSize: 12, fontWeight: '600', color: GREEN, marginBottom: 8 },
+  vbox: {
+    backgroundColor: '#0f2a0f', borderWidth: 1, borderColor: '#1e4a1e',
+    borderRadius: 10, padding: 12,
+  },
+  vboxTitle: { fontSize: 11, fontWeight: '600', color: GREEN, marginBottom: 6 },
+  vboxBody: { fontSize: 11, color: TEXT2, lineHeight: 22 },
+  vboxNote: { fontSize: 10, color: MUTED2, marginTop: 6 },
+
+  payNotice: {
+    backgroundColor: '#0d2a0d', borderWidth: 1, borderColor: '#1a5a1a',
+    borderRadius: 12, padding: 14, marginHorizontal: 16,
+  },
+  payNoticeTitle: { fontSize: 12, fontWeight: '600', color: GREEN, marginBottom: 8 },
+  payNoticeBody: { fontSize: 12, color: TEXT2, lineHeight: 22 },
+
+  // CYCLES
+  cycWrap: {
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 16, marginHorizontal: 16, overflow: 'hidden',
+  },
+  cycRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14 },
+  cycIcon: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#112011', borderWidth: 1, borderColor: '#1a4a1a',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2,
+  },
+  cycMeta: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 },
+  cycName: { fontSize: 14, fontWeight: '600', color: TEXT, marginBottom: 3 },
+  cycCt: { fontSize: 22, fontWeight: '700', color: TEXT, lineHeight: 26 },
+  cycEarn: { fontSize: 11, color: MUTED, marginTop: 3 },
+  cycRange: { fontSize: 11, color: MUTED, marginBottom: 3 },
+  cycPct: { fontSize: 18, fontWeight: '700', color: GREEN },
+  barFt: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 },
+  barFtTxt: { fontSize: 9, color: MUTED2 },
+
+  cyc2Trigger: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    padding: 12, paddingLeft: 14,
+    borderTopWidth: 1, borderTopColor: BORDER,
+  },
+  cyc2Label: { fontSize: 13, fontWeight: '500', color: TEXT },
+  cyc2Sub: { fontSize: 11, color: MUTED, marginTop: 1 },
+  cyc2Body: { borderTopWidth: 1, borderTopColor: BORDER },
+
+  // REFERRAL
+  refCard: {
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 16, marginHorizontal: 16, padding: 16, gap: 14,
+  },
+  refTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  refIcon: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#112011', borderWidth: 1, borderColor: '#1a4a1a',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  refLabel: { fontSize: 11, color: MUTED, marginBottom: 3 },
+  refCode: { fontSize: 18, fontWeight: '700', color: GREEN, letterSpacing: 2 },
+  copyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'transparent', borderWidth: 1, borderColor: '#2a5a2a',
+    borderRadius: 100, paddingHorizontal: 12, paddingVertical: 7,
+  },
+  copyBtnText: { color: GREEN, fontSize: 12, fontWeight: '500' },
+  shareBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, backgroundColor: '#1a6a2a', borderRadius: 100,
+    paddingVertical: 14,
+  },
+  shareBtnText: { color: GREEN, fontSize: 14, fontWeight: '600' },
+
+  // RE-ENROLL
+  reEnrollBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, backgroundColor: '#b45309', borderRadius: 100, height: 50,
+  },
+  reEnrollText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+
+  // PITCH LIBRARY
+  pitchWrap: {
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 16, marginHorizontal: 16, overflow: 'hidden',
+  },
+  pitchHdr: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  pitchTitle: { fontSize: 14, fontWeight: '600', color: TEXT },
+  pitchBody: { borderTopWidth: 1, borderTopColor: BORDER },
+  pitchItem: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    padding: 12, paddingHorizontal: 16,
+    borderBottomWidth: 1, borderBottomColor: '#0f1a0f',
+  },
+  piIcon: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: '#112011', borderWidth: 1, borderColor: '#1a4a1a',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  piTag: {
+    backgroundColor: '#0f2a0f', borderWidth: 1, borderColor: '#1a4a1a',
+    borderRadius: 100, paddingHorizontal: 8, paddingVertical: 2,
+    alignSelf: 'flex-start', marginBottom: 4,
+  },
+  piTagText: { fontSize: 10, fontWeight: '600', color: GREEN },
+  pitchHeadline: { fontSize: 12, color: TEXT, fontWeight: '500', marginBottom: 3, lineHeight: 18 },
+  pitchBodyTxt: { fontSize: 11, color: TEXT2, lineHeight: 18 },
+
+  // PAYOUT HISTORY
+  payoutSectionTitle: { fontSize: 15, fontWeight: '700', color: TEXT, marginBottom: 4 },
+  payoutRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 12, padding: 14,
+  },
+  payoutIconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  payoutLabel: { fontSize: 13, fontWeight: '600', color: TEXT },
+  payoutMeta: { fontSize: 11, color: MUTED, marginTop: 2 },
+  payoutAmount: { fontSize: 14, fontWeight: '700' },
+
+  // ENROLL / BANK FORMS
+  content: { padding: 20, gap: 20 },
+  heroCard: {
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 16, padding: 24, alignItems: 'center', gap: 12,
+  },
+  heroIcon: {
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: '#0d2a0d', borderWidth: 1, borderColor: '#1a5a1a',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  heroTitle: { color: TEXT, fontSize: 20, fontWeight: '700', textAlign: 'center', lineHeight: 26 },
+  heroSub: { color: TEXT2, fontSize: 13, textAlign: 'center', lineHeight: 22 },
+
+  ctaBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, backgroundColor: GREEN, borderRadius: 100, height: 52,
+    marginHorizontal: 16,
+  },
   ctaBtnDisabled: { opacity: 0.4 },
-  ctaBtnText: { color: Colors.black, fontSize: FontSize.md, fontWeight: FontWeight.bold },
+  ctaBtnText: { color: '#061006', fontSize: 14, fontWeight: '700' },
 
-  formCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.sm },
-  formLabel: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  formInput: { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.md, paddingHorizontal: Spacing.md, height: 50, color: Colors.text, fontSize: FontSize.md },
-  formHint: { color: Colors.textMuted, fontSize: FontSize.xs, lineHeight: 18 },
+  formCard: {
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 16, padding: 16, gap: 10,
+  },
+  formLabel: {
+    fontSize: 10, color: MUTED2, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2,
+  },
+  formInput: {
+    backgroundColor: '#0d1f0d', borderWidth: 1, borderColor: BORDER,
+    borderRadius: 12, paddingHorizontal: 14, height: 50,
+    color: TEXT, fontSize: 14,
+  },
+  formHint: { fontSize: 11, color: MUTED2, lineHeight: 18 },
 
-  ruleCard: { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.sm },
-  ruleTitle: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.bold, marginBottom: 4 },
-  ruleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
-  ruleText: { flex: 1, color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 20 },
+  ruleCard: {
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 16, padding: 16, gap: 8,
+  },
+  ruleTitle: { fontSize: 13, fontWeight: '700', color: TEXT, marginBottom: 4 },
+  ruleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  ruleDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: GREEN, marginTop: 7, flexShrink: 0 },
+  ruleText: { flex: 1, fontSize: 12, color: TEXT2, lineHeight: 20 },
 
-  backLink: { alignItems: 'center', paddingVertical: Spacing.sm },
-  backLinkText: { color: Colors.textSecondary, fontSize: FontSize.sm },
+  backLink: { alignItems: 'center', paddingVertical: 10 },
+  backLinkText: { color: MUTED, fontSize: 13 },
 
-  statusBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, backgroundColor: Colors.primaryMuted, borderWidth: 1, borderColor: 'rgba(0,200,83,0.3)', borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: 10 },
-  statusBannerWarning: { backgroundColor: Colors.warningMuted, borderColor: Colors.warning },
-  statusBannerText: { flex: 1, color: Colors.primary, fontSize: FontSize.sm, fontWeight: FontWeight.medium },
+  // BANK ONBOARDING
+  lookupBtn: {
+    backgroundColor: '#1a5a2a', borderRadius: 100, height: 50,
+    alignItems: 'center', justifyContent: 'center', marginTop: 8,
+  },
+  lookupBtnText: { color: GREEN, fontSize: 14, fontWeight: '600' },
+  nameResult: {
+    backgroundColor: '#0d2a0d', borderWidth: 1, borderColor: '#1a5a1a',
+    borderRadius: 12, padding: 14, marginTop: 12,
+  },
+  nameResultLabel: { fontSize: 10, color: MUTED2, marginBottom: 4, letterSpacing: 1, textTransform: 'uppercase' },
+  nameResultVal: { fontSize: 22, fontWeight: '700', color: GREEN },
+  nameResultSub: { fontSize: 11, color: MUTED2, marginTop: 3 },
 
-  progressCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.xl, padding: Spacing.xl, gap: Spacing.md },
-  progressLabel: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.medium },
-  progressNumbers: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-  progressCurrent: { color: Colors.primary, fontSize: 42, fontWeight: FontWeight.bold },
-  progressSep: { color: Colors.textMuted, fontSize: 28 },
-  progressTarget: { color: Colors.text, fontSize: FontSize.lg, fontWeight: FontWeight.semibold },
-  progressBarTrack: { height: 8, backgroundColor: Colors.surfaceElevated, borderRadius: 4, overflow: 'hidden' },
-  progressBarFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 4 },
-  progressMeta: { flexDirection: 'row', justifyContent: 'space-between' },
-  progressMetaText: { color: Colors.textMuted, fontSize: FontSize.xs },
-
-  referralCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.primary, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.md },
-  referralTitle: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.medium },
-  referralCodeRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.primaryMuted, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md },
-  referralCode: { flex: 1, color: Colors.primary, fontSize: FontSize.xxl, fontWeight: FontWeight.bold, letterSpacing: 2 },
-  copyBtn: { padding: 4 },
-  referralHint: { color: Colors.textMuted, fontSize: FontSize.xs, lineHeight: 18 },
-  shareBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, backgroundColor: Colors.primary, borderRadius: Radius.md, height: 46 },
-  shareBtnText: { color: Colors.black, fontWeight: FontWeight.bold, fontSize: FontSize.sm },
-
-  reEnrollBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, backgroundColor: Colors.warning, borderRadius: Radius.md, height: 50 },
-  reEnrollText: { color: Colors.black, fontWeight: FontWeight.bold, fontSize: FontSize.sm },
-
-  bankRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.surfaceBorder },
-  bankRowSelected: { backgroundColor: Colors.primaryMuted },
-  bankName: { color: Colors.text, fontSize: FontSize.sm, flex: 1, paddingRight: Spacing.sm },
-
-  cycleCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.xl, padding: Spacing.xl, gap: Spacing.md },
-  cycleCardComplete: { borderColor: Colors.success },
-  cycleCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cycleCardTitle: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  cycleCompleteBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.successMuted, borderRadius: Radius.full, paddingHorizontal: 10, paddingVertical: 4 },
-  cycleCompleteBadgeText: { color: Colors.success, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  cycleActiveText: { color: Colors.primary, fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
-  cycleNumbers: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-  cycleCurrent: { color: Colors.primary, fontSize: 36, fontWeight: FontWeight.bold },
-  cycleSep: { color: Colors.textMuted, fontSize: 24 },
-  cycleTarget: { color: Colors.text, fontSize: FontSize.md, fontWeight: FontWeight.semibold },
-  cycleReward: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xs },
-  cycleRewardText: { color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 },
-  payoutStatusBadge: { borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 3 },
-  payoutStatusText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-
-  pitchSection: { gap: Spacing.sm },
-  sectionHeader2: { color: Colors.text, fontSize: FontSize.lg, fontWeight: FontWeight.bold, marginBottom: 4 },
-  pitchSub: { color: Colors.textSecondary, fontSize: FontSize.sm, marginBottom: Spacing.sm },
-  pitchCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.lg, padding: Spacing.md, gap: Spacing.sm },
-  pitchCardOpen: { borderColor: Colors.primary },
-  pitchCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  pitchAudienceBadge: { backgroundColor: Colors.primaryMuted, borderRadius: Radius.full, paddingHorizontal: 10, paddingVertical: 4 },
-  pitchAudience: { color: Colors.primary, fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  pitchHeadline: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold, lineHeight: 20 },
-  pitchBody: { color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 22, borderTopWidth: 1, borderTopColor: Colors.surfaceBorder, paddingTop: Spacing.sm, marginTop: Spacing.xs },
-
-  payoutSection: { gap: Spacing.sm },
-  payoutRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder, borderRadius: Radius.md, padding: Spacing.md },
-  payoutIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  payoutLabel: { color: Colors.text, fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  payoutMeta: { color: Colors.textSecondary, fontSize: FontSize.xs, marginTop: 2 },
-  payoutAmount: { fontSize: FontSize.md, fontWeight: FontWeight.bold },
+  bankRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: BORDER,
+  },
+  bankRowSelected: { backgroundColor: '#0d2a0d' },
+  bankName: { color: TEXT, fontSize: 14, flex: 1, paddingRight: 12 },
 });
