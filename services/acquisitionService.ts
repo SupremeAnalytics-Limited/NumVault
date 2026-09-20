@@ -340,36 +340,28 @@ export function computeQualifyingProgress(
 }
 
 // ── Store referral code on signup ─────────────────────────────────────────────
+// Routed through the apply-referral-code edge function so the insert uses
+// service_role — authenticated users no longer have direct INSERT on
+// referred_customers. All validation (self-referral, duplicates) is server-side.
 
 export async function applyReferralCode(
-  customerId: string,
+  _customerId: string,
   code: string
 ): Promise<void> {
   const trimmed = code.trim().toUpperCase();
   if (!trimmed) return;
 
-  const { data: participant, error: pErr } = await supabase
-    .from('acquisition_participants')
-    .select('id')
-    .eq('referral_code', trimmed)
-    .maybeSingle();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) return;
 
-  if (pErr || !participant) return; // invalid code — silently ignore
-
-  // Avoid duplicate entries
-  const { data: existing } = await supabase
-    .from('referred_customers')
-    .select('id')
-    .eq('customer_id', customerId)
-    .eq('participant_id', participant.id)
-    .maybeSingle();
-
-  if (existing) return;
-
-  await supabase.from('referred_customers').insert({
-    customer_id: customerId,
-    participant_id: participant.id,
-    referral_code_used: trimmed,
-    validated: false,
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  await fetch(`${supabaseUrl}/functions/v1/apply-referral-code`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ code: trimmed }),
   });
+  // Failure is intentionally swallowed — caller wraps this in .catch() anyway
 }
