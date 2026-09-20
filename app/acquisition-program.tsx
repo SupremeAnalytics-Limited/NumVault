@@ -79,6 +79,8 @@ export default function AcquisitionProgramScreen() {
   const [acqLaunchState, setAcqLaunchState] = useState<AcqLaunchState>('first_launch');
   const landingScrollRef = useRef<ScrollView>(null);
 
+  const [destinationScreen, setDestinationScreen] = useState<Screen>('enroll');
+
   const [enrollName, setEnrollName] = useState('');
   const [enrolling, setEnrolling] = useState(false);
 
@@ -120,12 +122,16 @@ export default function AcquisitionProgramScreen() {
       if (p) {
         setParticipant(p);
         resolveAcqLaunchState(p);
+        const destination = mapStatusToScreen(p);
+        setDestinationScreen(destination);
         const [refs, pays] = await Promise.all([getMyReferredCustomers(p.id), getMyPayouts(p.id)]);
         setReferred(refs);
         setPayouts(pays);
-        setScreen(mapStatusToScreen(p));
+        // Always start at landing — enrolled users can skip through to their dashboard
+        setScreen('landing');
       } else {
         resolveAcqLaunchState(null);
+        setDestinationScreen('enroll');
         setScreen('landing');
       }
     } catch (e) {
@@ -366,18 +372,36 @@ export default function AcquisitionProgramScreen() {
                   landingScrollRef.current?.scrollTo({ x: next * SCREEN_WIDTH, animated: true });
                   setLandingStep(next);
                 } else {
-                  setScreen('enroll');
+                  setScreen(destinationScreen);
                 }
               }}
               activeOpacity={0.85}
             >
-              <MaterialIcons name={landingStep < LANDING_STEPS.length - 1 ? 'arrow-forward' : 'rocket-launch'} size={18} color={Colors.black} />
+              <MaterialIcons
+                name={landingStep < LANDING_STEPS.length - 1 ? 'arrow-forward' : participant ? 'dashboard' : 'rocket-launch'}
+                size={18}
+                color={Colors.black}
+              />
               <Text style={styles.ctaBtnText}>
-                {landingStep < LANDING_STEPS.length - 1 ? 'Continue' : 'Enroll in the Program'}
+                {landingStep < LANDING_STEPS.length - 1
+                  ? 'Next'
+                  : participant
+                  ? 'View My Progress'
+                  : 'Enroll in the Program'}
               </Text>
             </TouchableOpacity>
-            {/* Skip — only active_staff, only on screens 1–3 (not screen 4) */}
-            {acqLaunchState === 'active_staff' && landingStep < LANDING_STEPS.length - 1 ? (
+            {/* Skip to dashboard — always visible for enrolled users on all screens */}
+            {participant ? (
+              <TouchableOpacity
+                style={styles.backLink}
+                onPress={async () => {
+                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setScreen(destinationScreen);
+                }}
+              >
+                <Text style={styles.backLinkText}>Skip to my dashboard</Text>
+              </TouchableOpacity>
+            ) : acqLaunchState === 'active_staff' && landingStep < LANDING_STEPS.length - 1 ? (
               <TouchableOpacity
                 style={styles.backLink}
                 onPress={async () => {
