@@ -30,7 +30,7 @@ type AcqLaunchState = 'first_launch' | 'downgraded' | 'active_staff';
 
 const LANDING_STEPS = [
   {
-    label: 'Screen 1',
+    label: 'SupremeAnalytics intro',
     icon: 'business' as const,
     title: 'We build software that opens doors',
     body: 'SupremeAnalytics is a Nigerian software company. We build products that give everyday people — students, freelancers, and working professionals — access to the same digital opportunities as anyone else in the world.',
@@ -38,7 +38,7 @@ const LANDING_STEPS = [
     bullets: null as null | { text: string; check: boolean }[],
   },
   {
-    label: 'Screen 2',
+    label: 'Side income',
     icon: 'schedule' as const,
     title: 'A side income that fits your life',
     body: "Whether you're in school, at work, or building your own thing — we've created a way for you to earn on the side without changing anything about your routine. No office. No fixed hours. Just results.",
@@ -46,7 +46,7 @@ const LANDING_STEPS = [
     bullets: null,
   },
   {
-    label: 'Screen 3',
+    label: 'NumVault product',
     icon: 'phone-android' as const,
     title: 'Protect your number. Power your business.',
     body: "NumVault gives you a dedicated number for any platform — one that's yours permanently, with no recurring fees. It keeps your personal number private while giving your business, clients, and online activities their own dedicated lines. 2,300+ services. One place. People need this every day — your job is to show them it exists.",
@@ -54,7 +54,7 @@ const LANDING_STEPS = [
     bullets: null,
   },
   {
-    label: 'Screen 4',
+    label: 'Customer Acquisition Lead commitment',
     icon: 'emoji-events' as const,
     title: 'Earn your Job Position with our company as a Customer Acquisition Lead',
     body: 'Refer 76 paying customers in 30 days and we officially bring you on as a Customer Acquisition Lead — a paid staff role with your own dashboard and up to ₦100,000 a month. This is how you start.',
