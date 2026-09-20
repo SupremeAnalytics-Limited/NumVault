@@ -37,7 +37,7 @@ const LANDING_STEPS = [
     label: 'NumVault product',
     icon: 'phone-android' as const,
     title: 'Protect your number. Power your business.',
-    body: "NumVault gives you a dedicated number for any platform — one that's yours permanently, with no recurring fees. It keeps your personal number private while giving your business, clients, and online activities their own dedicated lines. 2,300+ services. One place. People need this every day — your job is to show them it exists.",
+    body: "NumVault gives you a dedicated number for any platform — one that's yours permanently, with no recurring fees. It keeps your personal number private while giving your businesses their own dedicated phone numbers across 2,300+ apps and services. This protects your private contact information from data reselling and spam messages from other platforms.",
   },
   {
     label: 'Customer Acquisition Lead commitment',
