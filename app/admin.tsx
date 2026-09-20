@@ -47,8 +47,11 @@ function maskAccount(num: string | null): string {
 function statusColor(s: string): string {
   switch (s) {
     case 'qualifying': return Colors.primary;
+    case 'pending_review': return Colors.warning;
     case 'eligible_not_joined': return Colors.success;
-    case 'active_lead': return Colors.warning;
+    case 'active_lead': return '#4ade80';
+    case 'needs_requalification': return Colors.warning;
+    case 'contract_complete': return Colors.textSecondary;
     case 'inactive': return Colors.textMuted;
     default: return Colors.textMuted;
   }
@@ -57,8 +60,11 @@ function statusColor(s: string): string {
 function statusLabel(s: string): string {
   switch (s) {
     case 'qualifying': return 'Qualifying';
+    case 'pending_review': return 'Pending Review';
     case 'eligible_not_joined': return 'Eligible';
     case 'active_lead': return 'Active Lead';
+    case 'needs_requalification': return 'Needs Re-qualify';
+    case 'contract_complete': return 'Contract Complete';
     case 'inactive': return 'Inactive';
     default: return s;
   }
@@ -144,10 +150,9 @@ export default function AdminDashboardScreen() {
           })
         );
         setParticipants(enriched);
+        // pending_review is the correct status set by sms-webhook when count hits 76
         setPendingReviews(
-          enriched.filter(
-            (p) => p.qualification_customers_count >= 76 && p.status === 'qualifying'
-          )
+          enriched.filter((p) => p.status === 'pending_review')
         );
       }
 
@@ -222,7 +227,7 @@ export default function AdminDashboardScreen() {
   const handleApprove = async (participantId: string) => {
     showAlert(
       'Approve Eligibility?',
-      'This will unlock the paid Lead invitation for this participant.',
+      'This will unlock the paid Lead invitation for this participant. They will see the bank onboarding screen to set up payouts.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -238,7 +243,7 @@ export default function AdminDashboardScreen() {
             if (error) {
               showAlert('Error', error.message);
             } else {
-              showAlert('Approved', 'Participant has been marked as eligible.');
+              showAlert('Approved', 'Participant has been marked as eligible. They will complete bank onboarding before activation.');
               await loadAll();
               setDetailParticipant(null);
             }
@@ -340,23 +345,45 @@ export default function AdminDashboardScreen() {
   // ── Activate lead ────────────────────────────────────────────────────────
 
   const handleActivateLead = async (participantId: string) => {
-    const now = new Date();
-    const windowStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const now = new Date().toISOString();
     showAlert(
       'Activate as NumVault Lead?',
-      `This sets the participant to active_lead and begins their first monthly window starting ${windowStart}.`,
+      'This sets status to active_lead, records the original_activation_timestamp, starts their first 30-day paid period, and resets their count to 0. Ensure bank details are on file before activating.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Activate',
           style: 'default',
           onPress: async () => {
+            // Set original_activation_timestamp ONLY if not already set (first activation)
+            const { data: current } = await supabase
+              .from('acquisition_participants')
+              .select('original_activation_timestamp, paid_periods_completed')
+              .eq('id', participantId)
+              .single();
+
+            const updates: Record<string, unknown> = {
+              status: 'active_lead',
+              active_lead_start_month: now.split('T')[0],
+              paid_period_start_date: now,
+              // Reset count to 0 for the new paid period
+              qualification_customers_count: 0,
+            };
+            // Only set original_activation_timestamp on first-ever activation
+            if (!current?.original_activation_timestamp) {
+              updates.original_activation_timestamp = now;
+            }
+
             const { error } = await supabase
               .from('acquisition_participants')
-              .update({ status: 'active_lead', active_lead_start_month: windowStart })
+              .update(updates)
               .eq('id', participantId);
             if (error) showAlert('Error', error.message);
-            else { showAlert('Lead activated', 'Participant is now an active NumVault Lead.'); await loadAll(); setDetailParticipant(null); }
+            else {
+              showAlert('Lead activated', 'Participant is now an active NumVault Lead. Their 30-day paid period has started.');
+              await loadAll();
+              setDetailParticipant(null);
+            }
           },
         },
       ]
@@ -684,7 +711,7 @@ export default function AdminDashboardScreen() {
 
               {/* Admin actions */}
               <View style={styles.detailActions}>
-                {detailParticipant.qualification_customers_count >= 76 && detailParticipant.status === 'qualifying' && (
+                {(detailParticipant.status === 'pending_review' || (detailParticipant.qualification_customers_count >= 76 && detailParticipant.status === 'qualifying')) && (
                   <>
                     <TouchableOpacity
                       style={[styles.reviewBtn, styles.approveBtn]}

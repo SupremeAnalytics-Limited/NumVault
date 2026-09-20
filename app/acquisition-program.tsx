@@ -15,7 +15,7 @@ import {
   getMyParticipant, enrollInProgram, reEnrollInProgram,
   getMyReferredCustomers, getPitchLibrary,
   daysRemainingInQualification, getMyPayouts, LeadPayout,
-  computeCycleProgress, getCurrentMonthStart,
+  computeCycleProgress, paidPeriodsRemaining,
 } from '@/services/acquisitionService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
@@ -286,17 +286,17 @@ export default function AcquisitionProgramScreen() {
   const windowExpired = daysLeft <= 0 && qualCount < 76 && participant?.status === 'qualifying';
   const isQualified = participant?.status === 'active_lead' || participant?.status === 'eligible_not_joined';
 
+  // Use 30-day period from paid_period_start_date (not calendar month)
   const cycleProgress = (() => {
-    if (!participant) return null;
-    const windowStart = getCurrentMonthStart().toISOString().split('T')[0];
-    return computeCycleProgress(referred, windowStart);
+    if (!participant || !participant.paid_period_start_date) return null;
+    return computeCycleProgress(referred, participant.paid_period_start_date);
   })();
 
   const c1 = Math.min(qualCount, 38);
   const c2 = Math.max(0, qualCount - 38);
 
-  // Months remaining calc (for active_lead)
-  const monthsRemaining = 6; // TODO: derive from active_lead_start_month when available
+  // Months remaining from paid_periods_completed — capped at 6
+  const monthsRemaining = paidPeriodsRemaining(participant ?? { paid_periods_completed: 0 } as AcquisitionParticipant);
   const potentialRemaining = monthsRemaining * 100000;
 
   if (loading) {
