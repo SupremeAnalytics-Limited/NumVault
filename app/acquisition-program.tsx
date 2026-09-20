@@ -769,13 +769,12 @@ export default function AcquisitionProgramScreen() {
                             </View>
                           ))}
                           <View style={styles.scardDivider} />
-                          <View style={styles.payNotice}>
-                            <Text style={styles.payNoticeTitle}>How your pay works</Text>
-                            <Text style={styles.payNoticeBody}>
-                              <Text style={{ color: GREEN }}>①</Text> Your first month started when you qualified.{'\n'}
-                              <Text style={{ color: GREEN }}>②</Text> At 38 customers, ₦50,000 goes under review. At 76, another ₦50,000 goes under review and your next month starts.{'\n'}
-                              <Text style={{ color: GREEN }}>③</Text> If your 30 days end before 76, you are paid for the customers you brought in and asked to re-qualify to start again.
+                          <View style={styles.vbox}>
+                            <Text style={styles.vboxTitle}>When a referral counts as a customer</Text>
+                            <Text style={styles.vboxBody}>
+                              {'① They sign up using your referral code\n② They buy at least one number\n③ Their order goes through successfully'}
                             </Text>
+                            <Text style={styles.vboxNote}>Just signing up is not enough, they need to actually make a purchase. Each customer counts once and needs their own email address.</Text>
                           </View>
                         </View>
                       ) : null}
@@ -797,7 +796,14 @@ export default function AcquisitionProgramScreen() {
                         </View>
                         <View style={{ alignItems: 'flex-end' }}>
                           <Text style={styles.cycRange}>customers 1–38</Text>
-                          <Text style={styles.cycPct}>{Math.round(c1 / 38 * 100)}%</Text>
+                          {isQualified ? (
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text style={styles.cycPct}>₦{Math.round(100000 * c1 / 76).toLocaleString()}</Text>
+                              <Text style={styles.barFtTxt}>earned</Text>
+                            </View>
+                          ) : (
+                            <Text style={styles.cycPct}>{Math.round(c1 / 38 * 100)}%</Text>
+                          )}
                         </View>
                       </View>
                       <SegBar filled={c1} total={38} />
@@ -826,7 +832,14 @@ export default function AcquisitionProgramScreen() {
                       <View style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
                         <View style={styles.cycMeta}>
                           <Text style={styles.cycCt}>{c2} / 38</Text>
-                          <Text style={styles.cycPct}>{Math.round(c2 / 38 * 100)}%</Text>
+                          {isQualified ? (
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text style={styles.cycPct}>₦{Math.round(100000 * c2 / 76).toLocaleString()}</Text>
+                              <Text style={styles.barFtTxt}>earned</Text>
+                            </View>
+                          ) : (
+                            <Text style={styles.cycPct}>{Math.round(c2 / 38 * 100)}%</Text>
+                          )}
                         </View>
                         <SegBar filled={c2} total={38} />
                         <View style={styles.barFt}>
