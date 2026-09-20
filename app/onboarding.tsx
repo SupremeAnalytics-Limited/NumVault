@@ -1,8 +1,8 @@
 // cache-bust: build-v4
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, TouchableOpacity,
-  ScrollView, StatusBar, ActivityIndicator,
+  ScrollView, StatusBar,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -14,101 +14,34 @@ import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme
 
 const { width, height } = Dimensions.get('window');
 
-// ── Launch state ──────────────────────────────────────────────────────────────
-// first_launch  — brand new user, no skip allowed on any screen
-// downgraded    — missed their target, no skip allowed (must re-read commitment)
-// active_staff  — has an active qualifying/lead record, skip allowed on 1–3
-type LaunchState = 'first_launch' | 'downgraded' | 'active_staff';
-
 // ── Screen definitions ────────────────────────────────────────────────────────
 const SCREENS = [
   {
     image: require('@/assets/images/nv_s1.png'),
-    headline: 'We build software that opens doors',
-    body: 'SupremeAnalytics is a Nigerian software company. We build products that give everyday people — students, freelancers, and working professionals — access to the same digital opportunities as anyone else in the world.',
+    headline: 'Privacy',
+    body: 'Keep your personal number private. NumVault gives you a dedicated number for any platform, app, or service — so your real number stays yours.',
     steps: null as null | { num: string; text: string }[],
   },
   {
     image: require('@/assets/images/nv_s2.png'),
-    headline: 'A side income that fits your life',
-    body: "Whether you're in school, at work, or building your own thing — we've created a way for you to earn on the side without changing anything about your routine. No office. No fixed hours. Just results.",
+    headline: 'Possibilities',
+    body: 'One place for every verification need. Whether you need a number for work, side projects, or online platforms — NumVault covers 2,300+ apps and services worldwide.',
     steps: null,
   },
   {
     image: require('@/assets/images/nv_s3.png'),
-    headline: 'Protect your number. Power your business.',
-    body: "NumVault gives you a dedicated number for any platform — one that's yours permanently, with no recurring fees. It keeps your personal number private while giving your business, clients, and online activities their own dedicated lines. 2,300+ services. One place. People need this every day — your job is to show them it exists.",
-    steps: null,
-  },
-  {
-    // Screen 4 reuses the first image (no new asset needed)
-    image: require('@/assets/images/nv_s1.png'),
-    headline: 'Earn your Job Position with our company as a Customer Acquisition Lead',
-    body: 'Refer 76 paying customers in 30 days and we officially bring you on as a Customer Acquisition Lead — a paid staff role with your own dashboard and up to ₦100,000 a month. This is how you start.',
+    headline: 'Capacity',
+    body: 'Have numbers for different purposes - personal, business, projects, accounts, and more. With 2,300+ apps & services available, you have the capacity to create separation wherever you need it.',
     steps: null,
   },
 ];
 
 export default function OnboardingScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [launchState, setLaunchState] = useState<LaunchState>('first_launch');
-  const [resolving, setResolving] = useState(true);
   const scrollRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
-
-  // ── Determine launch state from Supabase participant record ────────────────
-  useEffect(() => {
-    let cancelled = false;
-    async function resolve() {
-      try {
-        if (!user) {
-          // Not logged in yet — treat as first launch
-          if (!cancelled) { setLaunchState('first_launch'); setResolving(false); }
-          return;
-        }
-        const { getSupabaseClient } = await import('@/template');
-        const supabase = getSupabaseClient();
-        const { data: participant } = await supabase
-          .from('acquisition_participants')
-          .select('id, status, qualification_customers_count, qualification_start_date')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (!participant) {
-          // No participant record → first launch
-          if (!cancelled) { setLaunchState('first_launch'); setResolving(false); }
-          return;
-        }
-
-        // Active staff: any participant that is qualifying (active window), eligible,
-        // or an active_lead — they've demonstrated commitment and can skip 1–3
-        const isActive =
-          participant.status === 'active_lead' ||
-          participant.status === 'eligible_not_joined' ||
-          (participant.status === 'qualifying' &&
-            participant.qualification_customers_count > 0 &&
-            isWithin30Days(participant.qualification_start_date));
-
-        // Downgraded: had a record but window expired without reaching 76, or inactive
-        const isDowngraded =
-          participant.status === 'inactive' ||
-          (participant.status === 'qualifying' &&
-            participant.qualification_customers_count === 0 &&
-            !isWithin30Days(participant.qualification_start_date));
-
-        if (!cancelled) {
-          setLaunchState(isActive ? 'active_staff' : isDowngraded ? 'downgraded' : 'first_launch');
-          setResolving(false);
-        }
-      } catch {
-        if (!cancelled) { setLaunchState('first_launch'); setResolving(false); }
-      }
-    }
-    resolve();
-    return () => { cancelled = true; };
-  }, [user?.id]);
 
   const finish = () => {
     trackOnboardingCompleted();
@@ -131,20 +64,8 @@ export default function OnboardingScreen() {
     finish();
   };
 
-  // Skip is visible only for active_staff AND only on screens 1–3 (not screen 4)
-  const showSkip = launchState === 'active_staff' && currentIndex < SCREENS.length - 1;
-
   const screen = SCREENS[currentIndex];
   const isLast = currentIndex === SCREENS.length - 1;
-
-  if (resolving) {
-    return (
-      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
-        <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
-        <ActivityIndicator color={Colors.primary} size="large" />
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>
@@ -160,8 +81,8 @@ export default function OnboardingScreen() {
         <Text style={styles.logoWatermarkText}>NumVault</Text>
       </View>
 
-      {/* Skip button — only for active_staff on screens 1–3 */}
-      {showSkip ? (
+      {/* Skip button — visible on all screens except the last */}
+      {!isLast ? (
         <TouchableOpacity
           style={[styles.skipBtn, { top: insets.top + 16 }]}
           onPress={skip}
@@ -216,13 +137,6 @@ export default function OnboardingScreen() {
       </View>
     </View>
   );
-}
-
-function isWithin30Days(dateStr: string | null | undefined): boolean {
-  if (!dateStr) return false;
-  const start = new Date(dateStr).getTime();
-  const deadline = start + 30 * 24 * 60 * 60 * 1000;
-  return Date.now() < deadline;
 }
 
 const styles = StyleSheet.create({

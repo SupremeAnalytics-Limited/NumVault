@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, ActivityIndicator, Share, TextInput,
@@ -23,44 +23,43 @@ type Screen = 'landing' | 'enroll' | 'qualifying' | 'pending_review' | 'eligible
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// ── Launch state for acquisition landing ─────────────────────────────────────
+// first_launch / downgraded → no skip allowed on any screen
+// active_staff               → skip allowed on screens 1–3 only
+type AcqLaunchState = 'first_launch' | 'downgraded' | 'active_staff';
+
 const LANDING_STEPS = [
   {
-    label: 'The Product',
-    icon: 'phone-android' as const,
-    title: 'What NumVault does',
-    body: 'NumVault gives customers separate phone numbers for different digital purposes — personal, business, platforms, services, and more.\n\nPay as you go. No subscription. 2,300+ apps and services.\n\nThe core idea is separation of concern: one number for work, another for online platforms, another for sign-ups — without mixing everything into one personal number.',
+    label: 'Screen 1',
+    icon: 'business' as const,
+    title: 'We build software that opens doors',
+    body: 'SupremeAnalytics is a Nigerian software company. We build products that give everyday people — students, freelancers, and working professionals — access to the same digital opportunities as anyone else in the world.',
     highlights: null as null | { icon: string; label: string; sub: string }[],
     bullets: null as null | { text: string; check: boolean }[],
   },
   {
-    label: 'The Opportunity',
-    icon: 'lightbulb-outline' as const,
-    title: 'Why this is an opportunity for students',
-    body: 'The demand NumVault addresses exists in every student network — freelancers, entrepreneurs, online workers, creators, small-business owners. These are people who genuinely need a private number.\n\nThrough this program you develop practical experience in customer acquisition, digital marketing, referral marketing, and SaaS business growth.',
-    highlights: [
-      { icon: 'groups', label: 'Customer Acquisition', sub: 'Find and convert genuine customers' },
-      { icon: 'campaign', label: 'Digital Marketing', sub: 'Communicate the value of a digital product' },
-      { icon: 'trending-up', label: 'Performance Management', sub: 'Work toward measurable targets' },
-    ],
+    label: 'Screen 2',
+    icon: 'schedule' as const,
+    title: 'A side income that fits your life',
+    body: "Whether you're in school, at work, or building your own thing — we've created a way for you to earn on the side without changing anything about your routine. No office. No fixed hours. Just results.",
+    highlights: null,
     bullets: null,
   },
   {
-    label: 'The Path',
+    label: 'Screen 3',
+    icon: 'phone-android' as const,
+    title: 'Protect your number. Power your business.',
+    body: "NumVault gives you a dedicated number for any platform — one that's yours permanently, with no recurring fees. It keeps your personal number private while giving your business, clients, and online activities their own dedicated lines. 2,300+ services. One place. People need this every day — your job is to show them it exists.",
+    highlights: null,
+    bullets: null,
+  },
+  {
+    label: 'Screen 4',
     icon: 'emoji-events' as const,
-    title: 'How you qualify for the paid opportunity',
-    body: null as null | string,
-    highlights: [
-      { icon: 'groups', label: '76 customers in 30 days', sub: 'Unpaid qualification stage' },
-      { icon: 'manage-search', label: 'Eligibility review', sub: 'Admin verifies your acquisition history' },
-      { icon: 'payments', label: 'Become a NumVault Lead', sub: '₦50,000 per 38-customer cycle' },
-      { icon: 'calendar-today', label: 'Up to ₦100,000/month', sub: 'Maximum across 6 monthly windows' },
-    ],
-    bullets: [
-      { text: 'Sign up through your referral code', check: true },
-      { text: 'Purchase at least one phone number', check: true },
-      { text: 'Number successfully delivered', check: true },
-      { text: 'Signup or referral click alone', check: false },
-    ],
+    title: 'Earn your Job Position with our company as a Customer Acquisition Lead',
+    body: 'Refer 76 paying customers in 30 days and we officially bring you on as a Customer Acquisition Lead — a paid staff role with your own dashboard and up to ₦100,000 a month. This is how you start.',
+    highlights: null,
+    bullets: null,
   },
 ];
 
@@ -77,6 +76,7 @@ export default function AcquisitionProgramScreen() {
   const [screen, setScreen] = useState<Screen>('landing');
 
   const [landingStep, setLandingStep] = useState(0);
+  const [acqLaunchState, setAcqLaunchState] = useState<AcqLaunchState>('first_launch');
   const landingScrollRef = useRef<ScrollView>(null);
 
   const [enrollName, setEnrollName] = useState('');
@@ -95,6 +95,19 @@ export default function AcquisitionProgramScreen() {
 
   useEffect(() => { loadAll(); }, []);
 
+  // Resolve whether this user has an active qualifying/lead record
+  const resolveAcqLaunchState = useCallback(async (p: AcquisitionParticipant | null) => {
+    if (!p) { setAcqLaunchState('first_launch'); return; }
+    const isActive =
+      p.status === 'active_lead' ||
+      p.status === 'eligible_not_joined' ||
+      (p.status === 'qualifying' && p.qualification_customers_count > 0 && isWithin30Days(p.qualification_start_date));
+    const isDowngraded =
+      p.status === 'inactive' ||
+      (p.status === 'qualifying' && !isWithin30Days(p.qualification_start_date));
+    setAcqLaunchState(isActive ? 'active_staff' : isDowngraded ? 'downgraded' : 'first_launch');
+  }, []);
+
   useEffect(() => {
     if (screen === 'bank_onboarding' && bankList.length === 0) loadBankList();
   }, [screen]);
@@ -106,11 +119,13 @@ export default function AcquisitionProgramScreen() {
       setPitches(lib);
       if (p) {
         setParticipant(p);
+        resolveAcqLaunchState(p);
         const [refs, pays] = await Promise.all([getMyReferredCustomers(p.id), getMyPayouts(p.id)]);
         setReferred(refs);
         setPayouts(pays);
         setScreen(mapStatusToScreen(p));
       } else {
+        resolveAcqLaunchState(null);
         setScreen('landing');
       }
     } catch (e) {
@@ -361,7 +376,18 @@ export default function AcquisitionProgramScreen() {
                 {landingStep < LANDING_STEPS.length - 1 ? 'Continue' : 'Enroll in the Program'}
               </Text>
             </TouchableOpacity>
-            {landingStep > 0 ? (
+            {/* Skip — only active_staff, only on screens 1–3 (not screen 4) */}
+            {acqLaunchState === 'active_staff' && landingStep < LANDING_STEPS.length - 1 ? (
+              <TouchableOpacity
+                style={styles.backLink}
+                onPress={async () => {
+                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setScreen('enroll');
+                }}
+              >
+                <Text style={styles.backLinkText}>Skip intro</Text>
+              </TouchableOpacity>
+            ) : landingStep > 0 ? (
               <TouchableOpacity
                 style={styles.backLink}
                 onPress={async () => {
@@ -715,6 +741,12 @@ export default function AcquisitionProgramScreen() {
       )}
     </View>
   );
+}
+
+function isWithin30Days(dateStr: string | null | undefined): boolean {
+  if (!dateStr) return false;
+  const start = new Date(dateStr).getTime();
+  return Date.now() < start + 30 * 24 * 60 * 60 * 1000;
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
