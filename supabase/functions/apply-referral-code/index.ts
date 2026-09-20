@@ -80,11 +80,26 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Get buyer's normalized email
+    const { data: buyerProfile } = await admin
+      .from('user_profiles')
+      .select('email')
+      .eq('id', customerId)
+      .maybeSingle();
+    const normalizedEmail: string | null = buyerProfile?.email
+      ? (buyerProfile.email as string).toLowerCase().trim().replace(/\+[^@]*@/, '@')
+          .replace(
+            /^([^@]+)@(gmail\.com|googlemail\.com)$/,
+            (_: string, local: string) => local.replace(/\./g, '') + '@gmail.com'
+          )
+      : null;
+
     const { error: insertErr } = await admin.from('referred_customers').insert({
       customer_id: customerId,
       participant_id: participant.id,
       referral_code_used: trimmed,
       validated: false,
+      email_normalized: normalizedEmail,
     });
 
     if (insertErr) {

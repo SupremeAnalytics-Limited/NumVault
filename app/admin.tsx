@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, ActivityIndicator, RefreshControl, Modal,
-  Platform, Animated,
+  Platform, TextInput,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -13,18 +13,18 @@ import {
   AcquisitionParticipant, ReferredCustomer, LeadPayout, AcquisitionLedgerEntry,
   daysRemainingInQualification,
 } from '@/services/acquisitionService';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 
 const supabase = getSupabaseClient();
 const ADMIN_EMAIL = 'oluwaferanmionabanjo@gmail.com';
 
-// ── Design tokens (dark green aesthetic) ─────────────────────────────────────
+// ── Design tokens ─────────────────────────────────────────────────────────────
 const BG = '#0a0d0a';
 const SURFACE = '#0d1f0d';
 const SURFACE2 = '#0f240f';
 const BORDER = '#1a3a1a';
 const BORDER2 = '#1e3a1e';
 const GREEN = '#4ade80';
-const GREEN_DIM = '#1a6a2a';
 const MUTED = '#4a7a4a';
 const MUTED2 = '#3a6a3a';
 const TEXT = '#fff';
@@ -35,6 +35,8 @@ const RED = '#f87171';
 const RED_BG = 'rgba(248,113,113,0.12)';
 const GOLD = '#fbbf24';
 const GOLD_BG = 'rgba(251,191,36,0.12)';
+const BLUE = '#60a5fa';
+const BLUE_BG = 'rgba(96,165,250,0.12)';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface AdminParticipant extends AcquisitionParticipant {
@@ -42,18 +44,43 @@ interface AdminParticipant extends AcquisitionParticipant {
   validated_count: number;
   total_paid: number;
 }
-type AdminTab = 'overview' | 'participants' | 'reviews' | 'payouts';
+type AdminTab = 'overview' | 'participants' | 'payouts';
+
+// Payout enriched with customer list for review
+interface ReviewPayout extends LeadPayout {
+  participant_name: string;
+  customers: Array<{
+    id: string;
+    email_normalized: string | null;
+    customer_name: string | null;
+    validated_at: string | null;
+    order_id: string | null;
+    validation_note: string | null;
+  }>;
+}
 
 function statusMeta(s: string): { label: string; color: string; bg: string } {
   switch (s) {
-    case 'qualifying':          return { label: 'Qualifying',         color: GREEN,  bg: 'rgba(74,222,128,0.12)' };
-    case 'pending_review':      return { label: 'Pending Review',     color: GOLD,   bg: GOLD_BG };
-    case 'eligible_not_joined': return { label: 'Eligible',           color: GREEN,  bg: 'rgba(74,222,128,0.12)' };
-    case 'active_lead':         return { label: 'Active Lead',        color: GREEN,  bg: 'rgba(74,222,128,0.18)' };
-    case 'needs_requalification': return { label: 'Re-qualify',       color: ORANGE, bg: ORANGE_BG };
-    case 'contract_complete':   return { label: 'Contract Complete',  color: MUTED,  bg: '#111a11' };
-    case 'inactive':            return { label: 'Inactive',           color: MUTED,  bg: '#111a11' };
-    default:                    return { label: s,                     color: MUTED,  bg: '#111a11' };
+    case 'qualifying':            return { label: 'Qualifying',        color: GREEN,  bg: 'rgba(74,222,128,0.12)' };
+    case 'pending_review':        return { label: 'Pending Review',    color: GOLD,   bg: GOLD_BG };
+    case 'eligible_not_joined':   return { label: 'Eligible',          color: GREEN,  bg: 'rgba(74,222,128,0.12)' };
+    case 'active_lead':           return { label: 'Active Lead',       color: GREEN,  bg: 'rgba(74,222,128,0.18)' };
+    case 'needs_requalification': return { label: 'Re-qualify',        color: ORANGE, bg: ORANGE_BG };
+    case 'contract_complete':     return { label: 'Contract Complete', color: MUTED,  bg: '#111a11' };
+    case 'inactive':              return { label: 'Inactive',          color: MUTED,  bg: '#111a11' };
+    default:                      return { label: s,                   color: MUTED,  bg: '#111a11' };
+  }
+}
+
+function payoutStatusMeta(s: string): { label: string; color: string; bg: string } {
+  switch (s) {
+    case 'under_review': return { label: 'Under Review', color: GOLD,   bg: GOLD_BG };
+    case 'approved':     return { label: 'Approved',     color: BLUE,   bg: BLUE_BG };
+    case 'sent':         return { label: 'Sent',         color: GREEN,  bg: 'rgba(74,222,128,0.12)' };
+    case 'failed':       return { label: 'Failed',       color: RED,    bg: RED_BG };
+    case 'held':         return { label: 'Held',         color: ORANGE, bg: ORANGE_BG };
+    case 'pending':      return { label: 'Under Review', color: GOLD,   bg: GOLD_BG };
+    default:             return { label: s,              color: MUTED,  bg: '#111a11' };
   }
 }
 
@@ -74,32 +101,29 @@ export default function AdminDashboardScreen() {
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
 
-  // Data
   const [participants, setParticipants] = useState<AdminParticipant[]>([]);
-  const [pendingReviews, setPendingReviews] = useState<AdminParticipant[]>([]);
-  const [transfers, setTransfers] = useState<LeadPayout[]>([]);
+  const [allPayouts, setAllPayouts] = useState<LeadPayout[]>([]);
+  const [reviewPayouts, setReviewPayouts] = useState<ReviewPayout[]>([]);
   const [unattributedTotal, setUnattributedTotal] = useState(0);
   const [obligationTotal, setObligationTotal] = useState(0);
   const [totalTransferred, setTotalTransferred] = useState(0);
 
-  // Detail modal
   const [detailP, setDetailP] = useState<AdminParticipant | null>(null);
   const [detailRefs, setDetailRefs] = useState<ReferredCustomer[]>([]);
   const [detailPayouts, setDetailPayouts] = useState<LeadPayout[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
 
-  // Filter
   const [participantFilter, setParticipantFilter] = useState<string>('all');
+  const [actionLoading, setActionLoading] = useState(false);
+  const [rejectNoteInput, setRejectNoteInput] = useState('');
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [selectedPayoutForReject, setSelectedPayoutForReject] = useState<ReviewPayout | null>(null);
 
   useEffect(() => { checkAndLoad(); }, []);
 
-  // Silent 30-second auto-refresh while screen is open
   useEffect(() => {
     if (!isAdmin) return;
-    const interval = setInterval(() => {
-      loadAll();
-    }, 30_000);
+    const interval = setInterval(() => { loadAll(); }, 30_000);
     return () => clearInterval(interval);
   }, [isAdmin, loadAll]);
 
@@ -107,6 +131,18 @@ export default function AdminDashboardScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (user?.email !== ADMIN_EMAIL) { setIsAdmin(false); setLoading(false); return; }
     setIsAdmin(true);
+    // Close expired blocks for all active leads on admin load
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+        await fetch(`${supabaseUrl}/functions/v1/close-blocks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+          body: JSON.stringify({ participant_id: 'all' }),
+        });
+      }
+    } catch { /* non-blocking */ }
     await loadAll();
   };
 
@@ -118,7 +154,6 @@ export default function AdminDashboardScreen() {
         supabase.from('acquisition_ledger_entries').select('*'),
       ]);
 
-      // Enrich participants
       if (parts) {
         const enriched: AdminParticipant[] = await Promise.all(
           parts.map(async (p) => {
@@ -131,11 +166,55 @@ export default function AdminDashboardScreen() {
           })
         );
         setParticipants(enriched);
-        setPendingReviews(enriched.filter((p) => p.status === 'pending_review'));
       }
 
-      setTransfers((pays || []) as LeadPayout[]);
-      setTotalTransferred((pays || []).filter((p: any) => p.status === 'sent').reduce((s: number, p: any) => s + Number(p.amount), 0));
+      const paysData = (pays || []) as LeadPayout[];
+      setAllPayouts(paysData);
+      setTotalTransferred(paysData.filter((p) => p.status === 'sent').reduce((s, p) => s + Number(p.amount), 0));
+
+      // Build review payouts (under_review, approved, failed)
+      const reviewable = paysData.filter((p) =>
+        p.status === 'under_review' || p.status === 'approved' || p.status === 'failed' || p.status === 'pending'
+      );
+
+      const enrichedReview: ReviewPayout[] = await Promise.all(
+        reviewable.map(async (pout) => {
+          const participant = (parts || []).find((p) => p.id === pout.participant_id);
+          // Fetch customers attached to this payout
+          const { data: customers } = await supabase
+            .from('referred_customers')
+            .select('id, email_normalized, validated_at, order_id, validation_note, customer_id')
+            .eq('payout_id', pout.id)
+            .eq('validated', true)
+            .order('validated_at', { ascending: true });
+
+          // Fetch customer names
+          const enrichedCustomers = await Promise.all(
+            (customers || []).map(async (c) => {
+              const { data: profile } = await supabase
+                .from('user_profiles')
+                .select('name, email')
+                .eq('id', c.customer_id)
+                .maybeSingle();
+              return {
+                id: c.id,
+                email_normalized: c.email_normalized,
+                customer_name: profile?.name ?? null,
+                validated_at: c.validated_at,
+                order_id: c.order_id,
+                validation_note: c.validation_note,
+              };
+            })
+          );
+
+          return {
+            ...pout,
+            participant_name: participant?.name ?? 'Unknown',
+            customers: enrichedCustomers,
+          } as ReviewPayout;
+        })
+      );
+      setReviewPayouts(enrichedReview);
 
       const allLedger = ledger || [];
       setUnattributedTotal(allLedger.filter((l: any) => l.entry_type === 'unattributed_profit').reduce((s: number, l: any) => s + Number(l.amount), 0));
@@ -152,7 +231,7 @@ export default function AdminDashboardScreen() {
     setDetailP(p);
     setDetailLoading(true);
     const [{ data: refs }, { data: pays }] = await Promise.all([
-      supabase.from('referred_customers').select('*').eq('participant_id', p.id).order('created_at', { ascending: false }),
+      supabase.from('referred_customers').select('*').eq('participant_id', p.id).order('validated_at', { ascending: false }),
       supabase.from('lead_payouts').select('*').eq('participant_id', p.id).order('triggered_at', { ascending: false }),
     ]);
     setDetailRefs((refs || []) as ReferredCustomer[]);
@@ -160,62 +239,123 @@ export default function AdminDashboardScreen() {
     setDetailLoading(false);
   };
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Payout actions ────────────────────────────────────────────────────────
 
-  const handleApprove = (participantId: string) => {
-    showAlert('Approve Eligibility?', 'Participant will be marked eligible and can complete bank onboarding.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Approve', style: 'default', onPress: async () => {
-        setActionLoading(true);
-        const { error } = await supabase.from('acquisition_participants').update({ status: 'eligible_not_joined' }).eq('id', participantId);
-        setActionLoading(false);
-        if (error) { showAlert('Error', error.message); return; }
-        showAlert('Approved', 'Participant marked as eligible.');
-        await loadAll(); setDetailP(null);
-      }},
-    ]);
+  const handleApprovePayout = async (payout: ReviewPayout) => {
+    showAlert(
+      `Approve ₦${Number(payout.amount).toLocaleString()}?`,
+      `Block ${payout.block_number ?? '?'} Half ${payout.cycle_number} · ${payout.customers_in_cycle} customers. This will send a Paystack transfer.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Approve & Send',
+          style: 'default',
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              const token = session?.access_token;
+              const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+              const res = await fetch(`${supabaseUrl}/functions/v1/approve-payout`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ payout_id: payout.id, action: 'approve' }),
+              });
+              const data = await res.json();
+              if (!res.ok || data.error) {
+                showAlert('Error', data.error || 'Approval failed');
+              } else if (data.status === 'sent') {
+                showAlert('Sent', `Transfer sent. Code: ${data.transfer_code || '—'}`);
+              } else if (data.status === 'failed') {
+                showAlert('Transfer Failed', data.reason || 'Paystack transfer failed');
+              } else {
+                showAlert('Approved', 'Payout approved. Transfer processing.');
+              }
+              await loadAll();
+            } catch (e: any) {
+              showAlert('Error', e.message || 'Unexpected error');
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
-  const handleReject = (participantId: string) => {
-    showAlert('Reject Review?', 'Participant remains frozen at 76/76 pending appeal.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reject', style: 'destructive', onPress: async () => {
-        showAlert('Rejected', 'Participant notified.'); await loadAll();
-      }},
-    ]);
+  const handleRetryPayout = async (payout: ReviewPayout) => {
+    showAlert(
+      `Retry ₦${Number(payout.amount).toLocaleString()}?`,
+      `Re-attempt Paystack transfer for Block ${payout.block_number ?? '?'} Half ${payout.cycle_number}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Retry',
+          style: 'default',
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              const token = session?.access_token;
+              const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+              const res = await fetch(`${supabaseUrl}/functions/v1/approve-payout`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ payout_id: payout.id, action: 'approve' }),
+              });
+              const data = await res.json();
+              if (!res.ok || data.error) {
+                showAlert('Error', data.error || 'Retry failed');
+              } else {
+                showAlert('Retried', 'Transfer re-attempted.');
+              }
+              await loadAll();
+            } catch (e: any) {
+              showAlert('Error', e.message);
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
-  const handleActivateLead = (participantId: string) => {
-    showAlert('Activate as NumVault Lead?', 'Sets status to active_lead, starts their 30-day paid period, and resets their count to 0.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Activate', style: 'default', onPress: async () => {
-        setActionLoading(true);
-        const now = new Date().toISOString();
-        const { data: current } = await supabase.from('acquisition_participants').select('original_activation_timestamp').eq('id', participantId).single();
-        const updates: Record<string, unknown> = {
-          status: 'active_lead',
-          active_lead_start_month: now.split('T')[0],
-          paid_period_start_date: now,
-          qualification_customers_count: 0,
-        };
-        if (!current?.original_activation_timestamp) updates.original_activation_timestamp = now;
-        const { error } = await supabase.from('acquisition_participants').update(updates).eq('id', participantId);
-        setActionLoading(false);
-        if (error) { showAlert('Error', error.message); return; }
-        showAlert('Activated', 'Participant is now an active NumVault Lead.');
-        await loadAll(); setDetailP(null);
-      }},
-    ]);
+  const openRejectModal = (payout: ReviewPayout) => {
+    setSelectedPayoutForReject(payout);
+    setRejectNoteInput('');
+    setShowRejectModal(true);
   };
 
-  const handleRetryTransfer = (payout: LeadPayout) => {
-    showAlert('Retry Transfer?', `Re-queue ₦${Number(payout.amount).toLocaleString()} for this payout?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Retry', style: 'default', onPress: async () => {
-        await supabase.from('lead_payouts').update({ status: 'pending', failure_reason: null }).eq('id', payout.id);
-        await loadAll();
-      }},
-    ]);
+  const confirmReject = async () => {
+    if (!selectedPayoutForReject) return;
+    setShowRejectModal(false);
+    setActionLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      const res = await fetch(`${supabaseUrl}/functions/v1/approve-payout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ payout_id: selectedPayoutForReject.id, action: 'reject', review_note: rejectNoteInput }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        showAlert('Error', data.error || 'Reject failed');
+      } else {
+        showAlert('Held', 'Payout held. Participant notified.');
+      }
+      await loadAll();
+    } catch (e: any) {
+      showAlert('Error', e.message);
+    } finally {
+      setActionLoading(false);
+      setSelectedPayoutForReject(null);
+    }
   };
 
   // ── Guards ────────────────────────────────────────────────────────────────
@@ -231,9 +371,7 @@ export default function AdminDashboardScreen() {
   if (isAdmin === false) {
     return (
       <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <View style={styles.accessDeniedIcon}>
-          <MaterialIcons name="lock" size={32} color={RED} />
-        </View>
+        <View style={styles.accessDeniedIcon}><MaterialIcons name="lock" size={32} color={RED} /></View>
         <Text style={styles.accessDeniedTitle}>Admin access only</Text>
         <Text style={styles.accessDeniedSub}>This area is restricted to authorised staff.</Text>
         <TouchableOpacity style={styles.accessDeniedBtn} onPress={() => router.back()} activeOpacity={0.8}>
@@ -246,8 +384,8 @@ export default function AdminDashboardScreen() {
   // ── Derived stats ─────────────────────────────────────────────────────────
   const activeLeads = participants.filter((p) => p.status === 'active_lead').length;
   const qualifying  = participants.filter((p) => p.status === 'qualifying').length;
-  const failedPayouts = transfers.filter((t) => t.status === 'failed').length;
-  const pendingPayouts = transfers.filter((t) => t.status === 'pending').length;
+  const failedPayouts = allPayouts.filter((t) => t.status === 'failed').length;
+  const underReviewCount = reviewPayouts.length;
 
   const filteredParticipants = participantFilter === 'all'
     ? participants
@@ -256,23 +394,21 @@ export default function AdminDashboardScreen() {
   const FILTERS = [
     { key: 'all', label: 'All' },
     { key: 'qualifying', label: 'Qualifying' },
-    { key: 'pending_review', label: 'Review' },
     { key: 'active_lead', label: 'Active' },
     { key: 'needs_requalification', label: 'Re-qualify' },
+    { key: 'contract_complete', label: 'Done' },
   ];
 
   const TABS: { key: AdminTab; label: string; icon: keyof typeof MaterialIcons.glyphMap; badge?: number }[] = [
-    { key: 'overview',     label: 'Overview',     icon: 'dashboard' },
-    { key: 'participants', label: 'Team',          icon: 'groups',       badge: participants.length },
-    { key: 'reviews',      label: 'Reviews',       icon: 'fact-check',   badge: pendingReviews.length || undefined },
-    { key: 'payouts',      label: 'Payouts',       icon: 'payments',     badge: failedPayouts || undefined },
+    { key: 'overview',      label: 'Overview',   icon: 'dashboard' },
+    { key: 'participants',  label: 'Team',        icon: 'groups',   badge: participants.length },
+    { key: 'payouts',       label: 'Approvals',   icon: 'payments', badge: underReviewCount || undefined },
   ];
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" backgroundColor={BG} />
 
-      {/* ── Header ── */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
           <MaterialIcons name="arrow-back" size={20} color={GREEN} />
@@ -281,28 +417,20 @@ export default function AdminDashboardScreen() {
           <Text style={styles.headerTitle}>Admin Dashboard</Text>
           <Text style={styles.headerSub}>NumVault Acquisition Program</Text>
         </View>
-        <TouchableOpacity
-          style={styles.refreshBtn}
-          onPress={() => { setRefreshing(true); loadAll(); }}
-          activeOpacity={0.7}
-        >
-          {refreshing
-            ? <ActivityIndicator size="small" color={GREEN} />
-            : <MaterialIcons name="refresh" size={19} color={MUTED} />}
+        <TouchableOpacity style={styles.refreshBtn}
+          onPress={() => { setRefreshing(true); loadAll(); }} activeOpacity={0.7}>
+          {refreshing ? <ActivityIndicator size="small" color={GREEN} /> : <MaterialIcons name="refresh" size={19} color={MUTED} />}
         </TouchableOpacity>
       </View>
 
-      {/* ── Tab bar ── */}
       <View style={styles.tabBarWrap}>
         {TABS.map((t) => {
           const active = activeTab === t.key;
           return (
-            <TouchableOpacity
-              key={t.key}
+            <TouchableOpacity key={t.key}
               style={[styles.tabItem, active && styles.tabItemActive]}
               onPress={async () => { await Haptics.selectionAsync(); setActiveTab(t.key); }}
-              activeOpacity={0.8}
-            >
+              activeOpacity={0.8}>
               <MaterialIcons name={t.icon} size={16} color={active ? GREEN : MUTED} />
               <Text style={[styles.tabItemText, active && styles.tabItemTextActive]}>{t.label}</Text>
               {t.badge ? (
@@ -315,7 +443,6 @@ export default function AdminDashboardScreen() {
         })}
       </View>
 
-      {/* ── Content ── */}
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}
@@ -327,79 +454,52 @@ export default function AdminDashboardScreen() {
         {/* ─────────────────── OVERVIEW ─────────────────── */}
         {activeTab === 'overview' && (
           <>
-            {/* Alerts */}
-            {pendingReviews.length > 0 && (
-              <TouchableOpacity style={styles.alertBanner} onPress={() => setActiveTab('reviews')} activeOpacity={0.8}>
+            {underReviewCount > 0 && (
+              <TouchableOpacity style={styles.alertBanner} onPress={() => setActiveTab('payouts')} activeOpacity={0.8}>
                 <View style={styles.alertBannerDot} />
-                <Text style={styles.alertBannerText}>
-                  {pendingReviews.length} participant{pendingReviews.length > 1 ? 's' : ''} waiting for eligibility review
-                </Text>
+                <Text style={styles.alertBannerText}>{underReviewCount} payout{underReviewCount > 1 ? 's' : ''} waiting for your approval</Text>
                 <MaterialIcons name="chevron-right" size={16} color={GOLD} />
               </TouchableOpacity>
             )}
             {failedPayouts > 0 && (
               <TouchableOpacity style={[styles.alertBanner, styles.alertBannerRed]} onPress={() => setActiveTab('payouts')} activeOpacity={0.8}>
                 <View style={[styles.alertBannerDot, { backgroundColor: RED }]} />
-                <Text style={[styles.alertBannerText, { color: RED }]}>
-                  {failedPayouts} failed transfer{failedPayouts > 1 ? 's' : ''} — action required
-                </Text>
+                <Text style={[styles.alertBannerText, { color: RED }]}>{failedPayouts} failed transfer{failedPayouts > 1 ? 's' : ''} — action required</Text>
                 <MaterialIcons name="chevron-right" size={16} color={RED} />
               </TouchableOpacity>
             )}
 
-            {/* Financial overview */}
             <View style={styles.sectionLabel}><Text style={styles.sectionLabelText}>FINANCIAL OVERVIEW</Text></View>
             <View style={styles.finRow}>
               <FinCard label="Lead Obligations" value={`₦${obligationTotal.toLocaleString()}`} icon="account-balance" accent={GREEN} sub="Total owed to leads" />
-              <FinCard label="Unattributed Profit" value={`₦${unattributedTotal.toLocaleString()}`} icon="trending-up" accent="#60a5fa" sub="No referral attached" />
+              <FinCard label="Unattributed" value={`₦${unattributedTotal.toLocaleString()}`} icon="trending-up" accent="#60a5fa" sub="No referral attached" />
             </View>
             <View style={styles.finRow}>
-              <FinCard label="Total Transferred" value={`₦${totalTransferred.toLocaleString()}`} icon="send" accent={GREEN} sub={`${transfers.filter((t) => t.status === 'sent').length} successful payouts`} />
-              <FinCard label="Pending Payouts" value={String(pendingPayouts)} icon="pending" accent={GOLD} sub="Queued for transfer" />
+              <FinCard label="Total Transferred" value={`₦${totalTransferred.toLocaleString()}`} icon="send" accent={GREEN} sub={`${allPayouts.filter((t) => t.status === 'sent').length} sent`} />
+              <FinCard label="Under Review" value={String(underReviewCount)} icon="pending" accent={GOLD} sub="Awaiting approval" />
             </View>
 
-            {/* Program stats */}
             <View style={styles.sectionLabel}><Text style={styles.sectionLabelText}>PROGRAM STATS</Text></View>
             <View style={styles.statsGrid}>
               <StatTile icon="groups" label="Total Enrolled" value={String(participants.length)} />
               <StatTile icon="star" label="Active Leads" value={String(activeLeads)} accent={GREEN} />
               <StatTile icon="school" label="Qualifying" value={String(qualifying)} accent={GREEN} />
-              <StatTile icon="fact-check" label="Reviews" value={String(pendingReviews.length)} accent={pendingReviews.length > 0 ? GOLD : MUTED} />
+              <StatTile icon="fact-check" label="For Approval" value={String(underReviewCount)} accent={underReviewCount > 0 ? GOLD : MUTED} />
               <StatTile icon="error-outline" label="Failed Pays" value={String(failedPayouts)} accent={failedPayouts > 0 ? RED : MUTED} />
               <StatTile icon="how-to-reg" label="Contracts Done" value={String(participants.filter((p) => p.status === 'contract_complete').length)} />
             </View>
-
-            {/* Recent activity (latest 6 payouts) */}
-            {transfers.length > 0 && (
-              <>
-                <View style={styles.sectionLabel}><Text style={styles.sectionLabelText}>RECENT PAYOUTS</Text></View>
-                {transfers.slice(0, 6).map((t) => {
-                  const p = participants.find((x) => x.id === t.participant_id);
-                  return (
-                    <TransferRow key={t.id} transfer={t} name={p?.name} onRetry={handleRetryTransfer} />
-                  );
-                })}
-              </>
-            )}
           </>
         )}
 
-        {/* ─────────────────── TEAM / PARTICIPANTS ─────────────────── */}
+        {/* ─────────────────── TEAM ─────────────────── */}
         {activeTab === 'participants' && (
           <>
-            {/* Filter chips */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {FILTERS.map((f) => (
-                <TouchableOpacity
-                  key={f.key}
+                <TouchableOpacity key={f.key}
                   style={[styles.filterChip, participantFilter === f.key && styles.filterChipActive]}
-                  onPress={() => setParticipantFilter(f.key)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.filterChipText, participantFilter === f.key && styles.filterChipTextActive]}>
-                    {f.label}
-                  </Text>
+                  onPress={() => setParticipantFilter(f.key)} activeOpacity={0.8}>
+                  <Text style={[styles.filterChipText, participantFilter === f.key && styles.filterChipTextActive]}>{f.label}</Text>
                   {f.key !== 'all' && (
                     <Text style={[styles.filterChipCount, participantFilter === f.key && { color: GREEN }]}>
                       {participants.filter((p) => p.status === f.key).length}
@@ -423,8 +523,12 @@ export default function AdminDashboardScreen() {
                     <Text style={styles.participantCode}>{p.referral_code}</Text>
                     <View style={styles.participantMetaRow}>
                       <Text style={styles.participantMeta}>{p.validated_count} validated</Text>
-                      <Text style={[styles.participantMeta, { color: MUTED2 }]}>·</Text>
-                      {p.total_paid > 0 && <Text style={[styles.participantMeta, { color: GREEN }]}>₦{p.total_paid.toLocaleString()} paid</Text>}
+                      {p.total_paid > 0 && (
+                        <>
+                          <Text style={[styles.participantMeta, { color: MUTED2 }]}>·</Text>
+                          <Text style={[styles.participantMeta, { color: GREEN }]}>₦{p.total_paid.toLocaleString()} paid</Text>
+                        </>
+                      )}
                     </View>
                   </View>
                   <View style={{ alignItems: 'flex-end', gap: 6 }}>
@@ -437,81 +541,181 @@ export default function AdminDashboardScreen() {
           </>
         )}
 
-        {/* ─────────────────── REVIEWS ─────────────────── */}
-        {activeTab === 'reviews' && (
-          <>
-            {pendingReviews.length === 0 ? (
-              <EmptyState icon="fact-check" title="No pending reviews"
-                sub="Participants who reach 76 validated customers will appear here." />
-            ) : (
-              pendingReviews.map((p) => (
-                <View key={p.id} style={styles.reviewCard}>
-                  {/* Header */}
-                  <View style={styles.reviewCardTop}>
-                    <View style={styles.participantAvatar}>
-                      <Text style={styles.participantAvatarText}>{p.name.charAt(0).toUpperCase()}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.reviewName}>{p.name}</Text>
-                      <Text style={styles.participantCode}>{p.referral_code}</Text>
-                    </View>
-                    <View style={[styles.progressBadge]}>
-                      <MaterialIcons name="check-circle" size={12} color={GOLD} />
-                      <Text style={styles.progressBadgeText}>76 / 76</Text>
-                    </View>
-                  </View>
-
-                  {/* Stats */}
-                  <View style={styles.reviewStats}>
-                    <ReviewStat label="Enrolled" value={new Date(p.qualification_start_date || p.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })} />
-                    <View style={styles.reviewStatDivider} />
-                    <ReviewStat label="Days left" value={String(Math.max(0, daysRemainingInQualification(p.qualification_start_date)))} />
-                    <View style={styles.reviewStatDivider} />
-                    <ReviewStat label="Bank on file" value={p.bank_account_number ? 'Yes' : 'No'} valueColor={p.bank_account_number ? GREEN : RED} />
-                  </View>
-
-                  <TouchableOpacity style={styles.viewCustomersBtn}
-                    onPress={() => openDetail(p)} activeOpacity={0.8}>
-                    <Text style={styles.viewCustomersBtnText}>Review 76 customers</Text>
-                    <MaterialIcons name="arrow-forward" size={14} color={GREEN} />
-                  </TouchableOpacity>
-
-                  <View style={styles.reviewActions}>
-                    <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]}
-                      onPress={() => handleReject(p.id)} activeOpacity={0.85}>
-                      <Text style={styles.rejectBtnText}>Reject</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionBtn, styles.approveBtn]}
-                      onPress={() => handleApprove(p.id)} activeOpacity={0.85}>
-                      <MaterialIcons name="verified" size={15} color={BG} />
-                      <Text style={styles.approveBtnText}>Approve</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
-            )}
-          </>
-        )}
-
-        {/* ─────────────────── PAYOUTS ─────────────────── */}
+        {/* ─────────────────── PAYOUT APPROVALS ─────────────────── */}
         {activeTab === 'payouts' && (
           <>
-            {/* Payout summary strip */}
+            {/* Summary strip */}
             <View style={styles.payoutSummaryRow}>
-              <PayoutSummaryItem label="Sent" value={String(transfers.filter((t) => t.status === 'sent').length)} color={GREEN} />
-              <PayoutSummaryItem label="Pending" value={String(pendingPayouts)} color={GOLD} />
+              <PayoutSummaryItem label="Under Review" value={String(allPayouts.filter((t) => t.status === 'under_review' || t.status === 'pending').length)} color={GOLD} />
+              <PayoutSummaryItem label="Approved" value={String(allPayouts.filter((t) => t.status === 'approved').length)} color={BLUE} />
+              <PayoutSummaryItem label="Sent" value={String(allPayouts.filter((t) => t.status === 'sent').length)} color={GREEN} />
               <PayoutSummaryItem label="Failed" value={String(failedPayouts)} color={failedPayouts > 0 ? RED : MUTED} />
-              <PayoutSummaryItem label="Total Out" value={`₦${(totalTransferred / 1000).toFixed(0)}K`} color={GREEN} />
             </View>
 
-            {transfers.length === 0 ? (
-              <EmptyState icon="payments" title="No payouts yet" sub="Transfer records will appear here once payouts are triggered." />
-            ) : (
-              transfers.map((t) => {
-                const p = participants.find((x) => x.id === t.participant_id);
-                return <TransferRow key={t.id} transfer={t} name={p?.name} onRetry={handleRetryTransfer} expanded />;
-              })
-            )}
+            {reviewPayouts.length === 0 ? (
+              <EmptyState icon="payments" title="No payouts awaiting approval"
+                sub="Payout records will appear here when participants hit 38 or 76 customers in a block." />
+            ) : null}
+
+            {reviewPayouts.map((pout) => {
+              const sm = payoutStatusMeta(pout.status);
+              return (
+                <View key={pout.id} style={[styles.reviewPayoutCard, { borderColor: sm.color + '44' }]}>
+                  {/* Header */}
+                  <View style={styles.reviewPayoutHeader}>
+                    <View style={[styles.payoutIconWrap, { backgroundColor: sm.bg }]}>
+                      <MaterialIcons
+                        name={pout.status === 'sent' ? 'check-circle' : pout.status === 'failed' ? 'error' : pout.status === 'held' ? 'pause-circle' : 'pending'}
+                        size={18} color={sm.color}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.reviewPayoutName}>{pout.participant_name}</Text>
+                      <Text style={styles.reviewPayoutMeta}>
+                        Block {pout.block_number ?? '?'} · Half {pout.cycle_number} · {pout.customers_in_cycle} customers
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                      <Text style={[styles.reviewPayoutAmount, { color: sm.color }]}>
+                        ₦{Number(pout.amount).toLocaleString()}
+                      </Text>
+                      <View style={[styles.statusChip, { backgroundColor: sm.bg, borderColor: sm.color + '55' }]}>
+                        <Text style={[styles.statusChipText, { color: sm.color }]}>{sm.label}</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Failure reason */}
+                  {pout.status === 'failed' && pout.failure_reason ? (
+                    <View style={styles.failureBox}>
+                      <MaterialIcons name="error-outline" size={12} color={RED} />
+                      <Text style={styles.failureText} numberOfLines={2}>{pout.failure_reason}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Hold note */}
+                  {pout.status === 'held' && pout.review_note ? (
+                    <View style={styles.holdBox}>
+                      <MaterialIcons name="info" size={12} color={ORANGE} />
+                      <Text style={styles.holdText}>{pout.review_note}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Customer list */}
+                  {pout.customers.length > 0 ? (
+                    <View style={styles.customerListWrap}>
+                      <Text style={styles.customerListTitle}>
+                        Customers ({pout.customers.length})
+                      </Text>
+                      {pout.customers.map((c, i) => (
+                        <View key={c.id} style={[styles.customerRow, i === pout.customers.length - 1 && { borderBottomWidth: 0 }]}>
+                          <View style={[styles.customerIcon, c.validation_note === 'duplicate_email' ? { backgroundColor: RED_BG } : null]}>
+                            <MaterialIcons
+                              name={c.validation_note === 'duplicate_email' ? 'error' : 'person'}
+                              size={12}
+                              color={c.validation_note === 'duplicate_email' ? RED : GREEN}
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.customerEmail} numberOfLines={1}>
+                              {c.email_normalized ?? '—'}
+                            </Text>
+                            {c.customer_name ? (
+                              <Text style={styles.customerName}>{c.customer_name}</Text>
+                            ) : null}
+                            {c.validated_at ? (
+                              <Text style={styles.customerTime}>
+                                {new Date(c.validated_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              </Text>
+                            ) : null}
+                            {c.validation_note ? (
+                              <Text style={[styles.customerNote, { color: RED }]}>{c.validation_note}</Text>
+                            ) : null}
+                          </View>
+                          {c.order_id ? (
+                            <Text style={styles.orderIdChip} numberOfLines={1}>
+                              {c.order_id.slice(0, 8)}…
+                            </Text>
+                          ) : null}
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={styles.noCustomersText}>No customers linked to this payout yet.</Text>
+                  )}
+
+                  {/* Actions */}
+                  {(pout.status === 'under_review' || pout.status === 'pending' || pout.status === 'approved') ? (
+                    <View style={styles.payoutActions}>
+                      <TouchableOpacity
+                        style={[styles.actionBtn, styles.rejectBtn]}
+                        onPress={() => openRejectModal(pout)}
+                        disabled={actionLoading}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.rejectBtnText}>Hold</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.actionBtn, styles.approveBtn, actionLoading && { opacity: 0.5 }]}
+                        onPress={() => handleApprovePayout(pout)}
+                        disabled={actionLoading}
+                        activeOpacity={0.85}
+                      >
+                        {actionLoading ? <ActivityIndicator size="small" color={BG} /> : (
+                          <>
+                            <MaterialIcons name="send" size={14} color={BG} />
+                            <Text style={styles.approveBtnText}>Approve & Send</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  ) : pout.status === 'failed' ? (
+                    <TouchableOpacity
+                      style={[styles.retryBtn, actionLoading && { opacity: 0.5 }]}
+                      onPress={() => handleRetryPayout(pout)}
+                      disabled={actionLoading}
+                      activeOpacity={0.85}
+                    >
+                      <MaterialIcons name="refresh" size={14} color={GOLD} />
+                      <Text style={styles.retryBtnText}>Retry Transfer</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              );
+            })}
+
+            {/* Sent payouts summary */}
+            {allPayouts.filter((p) => p.status === 'sent').length > 0 ? (
+              <>
+                <View style={[styles.sectionLabel, { marginTop: 8 }]}>
+                  <Text style={styles.sectionLabelText}>SENT PAYOUTS</Text>
+                </View>
+                {allPayouts.filter((p) => p.status === 'sent').map((t) => {
+                  const p = participants.find((x) => x.id === t.participant_id);
+                  return (
+                    <View key={t.id} style={[styles.sentPayoutRow]}>
+                      <View style={[styles.payoutIconWrap, { backgroundColor: 'rgba(74,222,128,0.12)' }]}>
+                        <MaterialIcons name="check-circle" size={16} color={GREEN} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.sentPayoutName}>{p?.name ?? '—'}</Text>
+                        <Text style={styles.sentPayoutMeta}>
+                          Block {(t as any).block_number ?? '?'} · Half {t.cycle_number} · {t.customers_in_cycle} customers
+                        </Text>
+                        {t.sent_at ? (
+                          <Text style={styles.sentPayoutDate}>
+                            Sent {new Date(t.sent_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Text style={[styles.reviewPayoutAmount, { color: GREEN }]}>
+                        ₦{Number(t.amount).toLocaleString()}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -520,7 +724,6 @@ export default function AdminDashboardScreen() {
       <Modal visible={!!detailP} animationType="slide" onRequestClose={() => setDetailP(null)}>
         {detailP ? (
           <View style={[styles.container, { paddingTop: insets.top }]}>
-            {/* Modal header */}
             <View style={styles.modalHeader}>
               <TouchableOpacity style={styles.backBtn} onPress={() => setDetailP(null)} activeOpacity={0.7}>
                 <MaterialIcons name="close" size={20} color={GREEN} />
@@ -530,106 +733,31 @@ export default function AdminDashboardScreen() {
                 <StatusPill status={detailP.status} />
               </View>
             </View>
-
             <ScrollView showsVerticalScrollIndicator={false}
               contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}>
 
-              {/* Participant identity */}
               <View style={styles.detailCard}>
-                <View style={styles.detailCardRow}>
-                  <Text style={styles.detailLabel}>Referral Code</Text>
-                  <Text style={[styles.detailValue, styles.mono]}>{detailP.referral_code}</Text>
-                </View>
-                <View style={styles.detailCardDivider} />
-                <View style={styles.detailCardRow}>
-                  <Text style={styles.detailLabel}>Validated Customers</Text>
-                  <Text style={[styles.detailValue, { color: GREEN }]}>{detailP.validated_count}</Text>
-                </View>
-                <View style={styles.detailCardDivider} />
-                <View style={styles.detailCardRow}>
-                  <Text style={styles.detailLabel}>Total Paid Out</Text>
-                  <Text style={[styles.detailValue, { color: detailP.total_paid > 0 ? GREEN : TEXT2 }]}>
-                    {detailP.total_paid > 0 ? `₦${detailP.total_paid.toLocaleString()}` : '₦0'}
-                  </Text>
-                </View>
-                <View style={styles.detailCardDivider} />
-                <View style={styles.detailCardRow}>
-                  <Text style={styles.detailLabel}>Bank</Text>
-                  <Text style={styles.detailValue}>{detailP.bank_name || '—'}</Text>
-                </View>
-                <View style={styles.detailCardDivider} />
-                <View style={styles.detailCardRow}>
-                  <Text style={styles.detailLabel}>Account Number</Text>
-                  <Text style={[styles.detailValue, styles.mono]}>{maskAccount(detailP.bank_account_number)}</Text>
-                </View>
-                {detailP.paid_period_start_date ? (
-                  <>
-                    <View style={styles.detailCardDivider} />
+                {[
+                  { label: 'Referral Code', value: detailP.referral_code, mono: true },
+                  { label: 'Validated Customers', value: String(detailP.validated_count), color: GREEN },
+                  { label: 'Total Paid Out', value: detailP.total_paid > 0 ? `₦${detailP.total_paid.toLocaleString()}` : '₦0', color: detailP.total_paid > 0 ? GREEN : TEXT2 },
+                  { label: 'Bank', value: detailP.bank_name || '—' },
+                  { label: 'Account', value: maskAccount(detailP.bank_account_number), mono: true },
+                  ...(detailP.paid_period_start_date ? [{ label: 'Period Started', value: new Date(detailP.paid_period_start_date).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }) }] : []),
+                  ...(detailP.paid_periods_completed > 0 ? [{ label: 'Blocks Completed', value: `${detailP.paid_periods_completed} / 6`, color: GREEN }] : []),
+                ].map((row, i, arr) => (
+                  <React.Fragment key={row.label}>
                     <View style={styles.detailCardRow}>
-                      <Text style={styles.detailLabel}>Period Started</Text>
-                      <Text style={styles.detailValue}>
-                        {new Date(detailP.paid_period_start_date).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </Text>
+                      <Text style={styles.detailLabel}>{row.label}</Text>
+                      <Text style={[styles.detailValue, row.mono ? styles.mono : null, row.color ? { color: row.color } : null]}>{row.value}</Text>
                     </View>
-                  </>
-                ) : null}
-                {detailP.paid_periods_completed > 0 ? (
-                  <>
-                    <View style={styles.detailCardDivider} />
-                    <View style={styles.detailCardRow}>
-                      <Text style={styles.detailLabel}>Periods Completed</Text>
-                      <Text style={[styles.detailValue, { color: GREEN }]}>{detailP.paid_periods_completed} / 6</Text>
-                    </View>
-                  </>
-                ) : null}
+                    {i < arr.length - 1 ? <View style={styles.detailCardDivider} /> : null}
+                  </React.Fragment>
+                ))}
               </View>
 
-              {/* Admin actions */}
-              {(detailP.status === 'pending_review' || detailP.qualification_customers_count >= 76 && detailP.status === 'qualifying') ? (
-                <View style={styles.actionsGroup}>
-                  <Text style={styles.actionsGroupLabel}>ELIGIBILITY REVIEW</Text>
-                  <TouchableOpacity style={[styles.actionBtn, styles.approveBtn, { height: 50, borderRadius: 12 }]}
-                    onPress={() => handleApprove(detailP.id)} disabled={actionLoading} activeOpacity={0.85}>
-                    {actionLoading ? <ActivityIndicator color={BG} size="small" /> : (
-                      <>
-                        <MaterialIcons name="verified" size={16} color={BG} />
-                        <Text style={styles.approveBtnText}>Approve — Mark Eligible</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn, { height: 50, borderRadius: 12 }]}
-                    onPress={() => handleReject(detailP.id)} activeOpacity={0.85}>
-                    <Text style={styles.rejectBtnText}>Reject Review</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-
-              {detailP.status === 'eligible_not_joined' ? (
-                <View style={styles.actionsGroup}>
-                  <Text style={styles.actionsGroupLabel}>ACTIVATION</Text>
-                  <TouchableOpacity style={[styles.actionBtn, styles.approveBtn, { height: 50, borderRadius: 12 }]}
-                    onPress={() => handleActivateLead(detailP.id)} disabled={actionLoading} activeOpacity={0.85}>
-                    {actionLoading ? <ActivityIndicator color={BG} size="small" /> : (
-                      <>
-                        <MaterialIcons name="rocket-launch" size={16} color={BG} />
-                        <Text style={styles.approveBtnText}>Activate as NumVault Lead</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                  {!detailP.bank_account_number && (
-                    <View style={styles.warningBox}>
-                      <MaterialIcons name="warning" size={14} color={GOLD} />
-                      <Text style={styles.warningBoxText}>No bank account on file. Activation will succeed but payouts will be queued until bank details are added.</Text>
-                    </View>
-                  )}
-                </View>
-              ) : null}
-
-              {detailLoading ? (
-                <ActivityIndicator color={GREEN} style={{ marginVertical: 24 }} />
-              ) : (
+              {detailLoading ? <ActivityIndicator color={GREEN} style={{ marginVertical: 24 }} /> : (
                 <>
-                  {/* Referred customers */}
                   <View style={styles.sectionLabel}>
                     <Text style={styles.sectionLabelText}>REFERRED CUSTOMERS ({detailRefs.length})</Text>
                   </View>
@@ -643,28 +771,46 @@ export default function AdminDashboardScreen() {
                             color={r.validated ? GREEN : MUTED} />
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.refCustomerId} numberOfLines={1}>{r.customer_id}</Text>
-                          <Text style={styles.refCustomerMeta}>
-                            Signed up {new Date(r.signup_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}
-                            {r.validated_at ? ` · Validated ${new Date(r.validated_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}` : ''}
+                          <Text style={styles.refCustomerId} numberOfLines={1}>
+                            {(r as any).email_normalized ?? r.customer_id}
                           </Text>
+                          <Text style={styles.refCustomerMeta}>
+                            Block {r.block_number ?? '—'} ·{' '}
+                            {r.validated_at ? `Validated ${new Date(r.validated_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}` : 'Not validated'}
+                          </Text>
+                          {(r as any).validation_note ? (
+                            <Text style={{ fontSize: 10, color: RED }}>{(r as any).validation_note}</Text>
+                          ) : null}
                         </View>
                         <Text style={[styles.refCustomerStatus, { color: r.validated ? GREEN : MUTED }]}>
-                          {r.validated ? 'Valid' : 'Pending'}
+                          {r.validated ? (r.block_number === 0 ? 'Qual' : `Blk ${r.block_number}`) : 'Pending'}
                         </Text>
                       </View>
                     ))
                   )}
 
-                  {/* Payout history */}
                   {detailPayouts.length > 0 ? (
                     <>
                       <View style={styles.sectionLabel}>
                         <Text style={styles.sectionLabelText}>PAYOUT HISTORY</Text>
                       </View>
-                      {detailPayouts.map((pay) => (
-                        <TransferRow key={pay.id} transfer={pay} expanded />
-                      ))}
+                      {detailPayouts.map((pay) => {
+                        const sm = payoutStatusMeta(pay.status);
+                        return (
+                          <View key={pay.id} style={[styles.sentPayoutRow, { borderColor: sm.color + '44' }]}>
+                            <View style={[styles.payoutIconWrap, { backgroundColor: sm.bg }]}>
+                              <MaterialIcons name="payments" size={14} color={sm.color} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.sentPayoutName}>Block {(pay as any).block_number ?? '?'} · Half {pay.cycle_number}</Text>
+                              <Text style={styles.sentPayoutMeta}>{sm.label} · {pay.customers_in_cycle} customers</Text>
+                            </View>
+                            <Text style={[styles.reviewPayoutAmount, { color: sm.color }]}>
+                              ₦{Number(pay.amount).toLocaleString()}
+                            </Text>
+                          </View>
+                        );
+                      })}
                     </>
                   ) : null}
                 </>
@@ -672,6 +818,34 @@ export default function AdminDashboardScreen() {
             </ScrollView>
           </View>
         ) : null}
+      </Modal>
+
+      {/* ── Reject / Hold note modal ── */}
+      <Modal visible={showRejectModal} transparent animationType="slide"
+        onRequestClose={() => setShowRejectModal(false)}>
+        <View style={styles.rejectOverlay}>
+          <View style={styles.rejectSheet}>
+            <Text style={styles.rejectSheetTitle}>Hold payout</Text>
+            <Text style={styles.rejectSheetSub}>Enter a note for the participant (optional)</Text>
+            <TextInput
+              style={styles.rejectNoteInput}
+              value={rejectNoteInput}
+              onChangeText={setRejectNoteInput}
+              placeholder="Reason for hold..."
+              placeholderTextColor={MUTED2}
+              multiline
+              numberOfLines={3}
+            />
+            <View style={styles.rejectSheetActions}>
+              <TouchableOpacity style={styles.rejectCancelBtn} onPress={() => setShowRejectModal(false)} activeOpacity={0.8}>
+                <Text style={styles.rejectCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.rejectConfirmBtn} onPress={confirmReject} activeOpacity={0.8}>
+                <Text style={styles.rejectConfirmText}>Hold Payout</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -692,10 +866,7 @@ function FinCard({ label, value, icon, accent, sub }: { label: string; value: st
   );
 }
 const finStyles = StyleSheet.create({
-  card: {
-    flex: 1, backgroundColor: SURFACE, borderWidth: 1,
-    borderRadius: 14, padding: 14, gap: 5,
-  },
+  card: { flex: 1, backgroundColor: SURFACE, borderWidth: 1, borderRadius: 14, padding: 14, gap: 5 },
   iconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
   value: { fontSize: 22, fontWeight: '700', color: TEXT },
   label: { fontSize: 12, fontWeight: '600', color: TEXT2 },
@@ -712,10 +883,7 @@ function StatTile({ icon, label, value, accent }: { icon: keyof typeof MaterialI
   );
 }
 const statStyles = StyleSheet.create({
-  tile: {
-    width: '31%', backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
-    borderRadius: 12, padding: 12, alignItems: 'flex-start', gap: 4,
-  },
+  tile: { width: '31%', backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 12, alignItems: 'flex-start', gap: 4 },
   value: { fontSize: 24, fontWeight: '700', color: TEXT },
   label: { fontSize: 10, color: MUTED, lineHeight: 14 },
 });
@@ -731,70 +899,6 @@ function StatusPill({ status }: { status: string }) {
 const pillStyles = StyleSheet.create({
   pill: { borderWidth: 1, borderRadius: 100, paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start' },
   text: { fontSize: 10, fontWeight: '700' },
-});
-
-function ReviewStat({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
-  return (
-    <View style={rvStyles.wrap}>
-      <Text style={rvStyles.value} style={[rvStyles.value, valueColor ? { color: valueColor } : null]}>{value}</Text>
-      <Text style={rvStyles.label}>{label}</Text>
-    </View>
-  );
-}
-const rvStyles = StyleSheet.create({
-  wrap: { flex: 1, alignItems: 'center' },
-  value: { fontSize: 16, fontWeight: '700', color: TEXT, marginBottom: 2 },
-  label: { fontSize: 10, color: MUTED },
-});
-
-function TransferRow({ transfer: t, name, onRetry, expanded }: { transfer: LeadPayout; name?: string; onRetry?: (t: LeadPayout) => void; expanded?: boolean }) {
-  const isPaid = t.status === 'sent';
-  const isFailed = t.status === 'failed';
-  const iconColor = isPaid ? GREEN : isFailed ? RED : GOLD;
-  const iconBg = isPaid ? 'rgba(74,222,128,0.15)' : isFailed ? RED_BG : GOLD_BG;
-  const iconName: keyof typeof MaterialIcons.glyphMap = isPaid ? 'check-circle' : isFailed ? 'error' : 'pending';
-  return (
-    <View style={trStyles.row}>
-      <View style={[trStyles.icon, { backgroundColor: iconBg }]}>
-        <MaterialIcons name={iconName} size={18} color={iconColor} />
-      </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        {name ? <Text style={trStyles.name}>{name}</Text> : null}
-        <Text style={trStyles.meta}>
-          Cycle {t.cycle_number} · {new Date(t.monthly_window_start).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' })}
-        </Text>
-        {expanded && t.paystack_transfer_code ? (
-          <Text style={trStyles.code} numberOfLines={1}>{t.paystack_transfer_code}</Text>
-        ) : null}
-        {isFailed && t.failure_reason ? (
-          <Text style={trStyles.error} numberOfLines={2}>{t.failure_reason}</Text>
-        ) : null}
-      </View>
-      <View style={{ alignItems: 'flex-end', gap: 6 }}>
-        <Text style={[trStyles.amount, { color: isPaid ? GREEN : TEXT }]}>₦{Number(t.amount).toLocaleString()}</Text>
-        {isFailed && onRetry ? (
-          <TouchableOpacity style={trStyles.retryBtn} onPress={() => onRetry(t)} activeOpacity={0.8}>
-            <Text style={trStyles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-const trStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
-    borderRadius: 12, padding: 14,
-  },
-  icon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  name: { fontSize: 13, fontWeight: '600', color: TEXT },
-  meta: { fontSize: 11, color: TEXT2 },
-  code: { fontSize: 10, color: MUTED, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
-  error: { fontSize: 10, color: RED, lineHeight: 16 },
-  amount: { fontSize: 14, fontWeight: '700' },
-  retryBtn: { backgroundColor: GOLD_BG, borderWidth: 1, borderColor: GOLD, borderRadius: 100, paddingHorizontal: 10, paddingVertical: 3 },
-  retryText: { color: GOLD, fontSize: 10, fontWeight: '700' },
 });
 
 function PayoutSummaryItem({ label, value, color }: { label: string; value: string; color: string }) {
@@ -814,9 +918,7 @@ const psStyles = StyleSheet.create({
 function EmptyState({ icon, title, sub }: { icon: keyof typeof MaterialIcons.glyphMap; title: string; sub: string }) {
   return (
     <View style={emStyles.wrap}>
-      <View style={emStyles.iconWrap}>
-        <MaterialIcons name={icon} size={28} color={MUTED} />
-      </View>
+      <View style={emStyles.iconWrap}><MaterialIcons name={icon} size={28} color={MUTED} /></View>
       <Text style={emStyles.title}>{title}</Text>
       <Text style={emStyles.sub}>{sub}</Text>
     </View>
@@ -833,28 +935,18 @@ const emStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
   center: { alignItems: 'center', justifyContent: 'center', gap: 16 },
-
-  // Access denied
   accessDeniedIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: RED_BG, borderWidth: 1, borderColor: RED + '55', alignItems: 'center', justifyContent: 'center' },
   accessDeniedTitle: { fontSize: 20, fontWeight: '700', color: TEXT },
   accessDeniedSub: { fontSize: 13, color: TEXT2, textAlign: 'center' },
   accessDeniedBtn: { backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 100, paddingHorizontal: 24, paddingVertical: 12 },
   accessDeniedBtnText: { color: TEXT2, fontSize: 14, fontWeight: '600' },
-
-  // Header
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: BORDER },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER2, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   refreshBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: TEXT },
   headerSub: { fontSize: 11, color: MUTED, marginTop: 1 },
-
-  // Tab bar
-  tabBarWrap: {
-    flexDirection: 'row', marginHorizontal: 16, marginBottom: 12,
-    backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER2,
-    borderRadius: 14, padding: 4, gap: 2,
-  },
+  tabBarWrap: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 12, backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER2, borderRadius: 14, padding: 4, gap: 2 },
   tabItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 9, borderRadius: 10 },
   tabItemActive: { backgroundColor: '#1a3a1a' },
   tabItemText: { fontSize: 11, fontWeight: '500', color: MUTED },
@@ -863,125 +955,94 @@ const styles = StyleSheet.create({
   tabBadgeActive: { backgroundColor: 'rgba(74,222,128,0.2)' },
   tabBadgeText: { fontSize: 9, fontWeight: '700', color: MUTED },
   tabBadgeTextActive: { color: GREEN },
-
   content: { paddingHorizontal: 16, gap: 10 },
-
-  // Alerts
-  alertBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: GOLD_BG, borderWidth: 1, borderColor: GOLD + '55',
-    borderRadius: 12, padding: 13,
-  },
+  alertBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: GOLD_BG, borderWidth: 1, borderColor: GOLD + '55', borderRadius: 12, padding: 13 },
   alertBannerRed: { backgroundColor: RED_BG, borderColor: RED + '55' },
   alertBannerDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: GOLD, flexShrink: 0 },
   alertBannerText: { flex: 1, fontSize: 12, fontWeight: '500', color: GOLD },
-
-  // Section label
   sectionLabel: { marginTop: 4 },
   sectionLabelText: { fontSize: 10, fontWeight: '700', color: MUTED2, letterSpacing: 1.2 },
-
-  // Finance
   finRow: { flexDirection: 'row', gap: 10 },
-
-  // Stats grid
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-
-  // Filter chips
   filterRow: { gap: 8, paddingRight: 16, paddingBottom: 2 },
-  filterChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
-    borderRadius: 100, paddingHorizontal: 14, paddingVertical: 8,
-  },
+  filterChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 100, paddingHorizontal: 14, paddingVertical: 8 },
   filterChipActive: { borderColor: GREEN, backgroundColor: 'rgba(74,222,128,0.1)' },
   filterChipText: { fontSize: 12, fontWeight: '500', color: TEXT2 },
   filterChipTextActive: { color: GREEN, fontWeight: '700' },
   filterChipCount: { fontSize: 11, fontWeight: '700', color: MUTED },
-
-  // Participant card
-  participantCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
-    borderRadius: 14, padding: 14,
-  },
-  participantAvatar: {
-    width: 42, height: 42, borderRadius: 21,
-    backgroundColor: 'rgba(74,222,128,0.12)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.25)',
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
+  participantCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 14, padding: 14 },
+  participantAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(74,222,128,0.12)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.25)', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   participantAvatarText: { color: GREEN, fontSize: 16, fontWeight: '700' },
   participantName: { fontSize: 14, fontWeight: '600', color: TEXT },
   participantCode: { fontSize: 11, color: MUTED, letterSpacing: 0.5 },
   participantMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1 },
   participantMeta: { fontSize: 11, color: TEXT2 },
-
-  // Review card
-  reviewCard: {
-    backgroundColor: SURFACE, borderWidth: 1, borderColor: GOLD + '44',
-    borderRadius: 16, padding: 16, gap: 12,
-  },
-  reviewCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  reviewName: { fontSize: 15, fontWeight: '700', color: TEXT },
-  progressBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: GOLD_BG, borderWidth: 1, borderColor: GOLD + '55',
-    borderRadius: 100, paddingHorizontal: 8, paddingVertical: 4,
-  },
-  progressBadgeText: { color: GOLD, fontSize: 11, fontWeight: '700' },
-  reviewStats: {
-    flexDirection: 'row', backgroundColor: SURFACE2,
-    borderRadius: 10, paddingVertical: 12,
-    borderWidth: 1, borderColor: BORDER,
-  },
-  reviewStatDivider: { width: 1, backgroundColor: BORDER },
-  viewCustomersBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    borderWidth: 1, borderColor: GREEN + '44', borderRadius: 10,
-    paddingVertical: 10,
-  },
-  viewCustomersBtnText: { color: GREEN, fontSize: 13, fontWeight: '600' },
-  reviewActions: { flexDirection: 'row', gap: 10 },
-
-  // Action buttons
-  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 46, borderRadius: 10 },
-  approveBtn: { backgroundColor: GREEN },
-  approveBtnText: { color: BG, fontWeight: '700', fontSize: 14 },
-  rejectBtn: { borderWidth: 1, borderColor: RED + '55', backgroundColor: RED_BG },
-  rejectBtnText: { color: RED, fontWeight: '700', fontSize: 14 },
-  actionsGroup: { gap: 10 },
-  actionsGroupLabel: { fontSize: 10, fontWeight: '700', color: MUTED2, letterSpacing: 1.2 },
-  warningBox: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    backgroundColor: GOLD_BG, borderWidth: 1, borderColor: GOLD + '44',
-    borderRadius: 10, padding: 12,
-  },
-  warningBoxText: { flex: 1, fontSize: 11, color: TEXT2, lineHeight: 18 },
-
-  // Payout summary
   payoutSummaryRow: { flexDirection: 'row', gap: 8 },
 
+  // Review payout card
+  reviewPayoutCard: {
+    backgroundColor: SURFACE, borderWidth: 1,
+    borderRadius: 16, padding: 16, gap: 12,
+  },
+  reviewPayoutHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  payoutIconWrap: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  reviewPayoutName: { fontSize: 14, fontWeight: '700', color: TEXT },
+  reviewPayoutMeta: { fontSize: 11, color: TEXT2, marginTop: 2 },
+  reviewPayoutAmount: { fontSize: 16, fontWeight: '700' },
+  statusChip: { borderWidth: 1, borderRadius: 100, paddingHorizontal: 7, paddingVertical: 2 },
+  statusChipText: { fontSize: 10, fontWeight: '700' },
+
+  failureBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: RED_BG, borderWidth: 1, borderColor: RED + '44', borderRadius: 8, padding: 10 },
+  failureText: { flex: 1, fontSize: 11, color: RED, lineHeight: 16 },
+  holdBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: ORANGE_BG, borderWidth: 1, borderColor: ORANGE + '44', borderRadius: 8, padding: 10 },
+  holdText: { flex: 1, fontSize: 11, color: ORANGE, lineHeight: 16 },
+
+  customerListWrap: { backgroundColor: SURFACE2, borderWidth: 1, borderColor: BORDER, borderRadius: 10, overflow: 'hidden' },
+  customerListTitle: { fontSize: 10, fontWeight: '700', color: MUTED2, letterSpacing: 1, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 },
+  customerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER },
+  customerIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.12)', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 },
+  customerEmail: { fontSize: 12, color: TEXT, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  customerName: { fontSize: 11, color: TEXT2, marginTop: 1 },
+  customerTime: { fontSize: 10, color: MUTED, marginTop: 1 },
+  customerNote: { fontSize: 10, fontWeight: '700', marginTop: 2 },
+  orderIdChip: { fontSize: 9, color: MUTED, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', flexShrink: 0, maxWidth: 70 },
+  noCustomersText: { fontSize: 11, color: MUTED, textAlign: 'center', paddingVertical: 12 },
+
+  payoutActions: { flexDirection: 'row', gap: 10 },
+  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 44, borderRadius: 10 },
+  approveBtn: { backgroundColor: GREEN },
+  approveBtnText: { color: BG, fontWeight: '700', fontSize: 13 },
+  rejectBtn: { borderWidth: 1, borderColor: ORANGE + '55', backgroundColor: ORANGE_BG },
+  rejectBtnText: { color: ORANGE, fontWeight: '700', fontSize: 13 },
+  retryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: GOLD + '55', backgroundColor: GOLD_BG, borderRadius: 10, height: 40 },
+  retryBtnText: { color: GOLD, fontWeight: '700', fontSize: 12 },
+
+  sentPayoutRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 12 },
+  sentPayoutName: { fontSize: 13, fontWeight: '600', color: TEXT },
+  sentPayoutMeta: { fontSize: 11, color: TEXT2, marginTop: 1 },
+  sentPayoutDate: { fontSize: 10, color: MUTED, marginTop: 1 },
+
+  // Reject modal
+  rejectOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  rejectSheet: { backgroundColor: SURFACE, borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 24, gap: 16 },
+  rejectSheetTitle: { fontSize: 18, fontWeight: '700', color: TEXT },
+  rejectSheetSub: { fontSize: 13, color: TEXT2 },
+  rejectNoteInput: { backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14, color: TEXT, fontSize: 14, minHeight: 80, textAlignVertical: 'top' },
+  rejectSheetActions: { flexDirection: 'row', gap: 10 },
+  rejectCancelBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER, borderRadius: 10, height: 46 },
+  rejectCancelText: { color: TEXT2, fontWeight: '600', fontSize: 14 },
+  rejectConfirmBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: ORANGE_BG, borderWidth: 1, borderColor: ORANGE + '55', borderRadius: 10, height: 46 },
+  rejectConfirmText: { color: ORANGE, fontWeight: '700', fontSize: 14 },
+
   // Detail modal
-  detailCard: {
-    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
-    borderRadius: 14, overflow: 'hidden',
-  },
-  detailCardRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 13,
-  },
+  detailCard: { backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 14, overflow: 'hidden' },
+  detailCardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
   detailCardDivider: { height: 1, backgroundColor: BORDER },
   detailLabel: { fontSize: 13, color: TEXT2 },
   detailValue: { fontSize: 13, fontWeight: '600', color: TEXT, textAlign: 'right', flex: 1 },
   mono: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12 },
-
   emptyDetailText: { fontSize: 12, color: MUTED, textAlign: 'center', padding: 20 },
-
-  // Referred customers in detail
-  refCustomerRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
-    borderRadius: 10, padding: 12,
-  },
+  refCustomerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 10, padding: 12 },
   refCustomerIcon: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   refCustomerId: { fontSize: 11, color: TEXT2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   refCustomerMeta: { fontSize: 10, color: MUTED, marginTop: 2 },

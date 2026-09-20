@@ -11,11 +11,12 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { useAlert } from '@/template';
 import {
-  AcquisitionParticipant, ReferredCustomer, PitchItem,
+  AcquisitionParticipant, ReferredCustomer, PitchItem, LeadPayout,
   getMyParticipant, enrollInProgram, reEnrollInProgram,
   getMyReferredCustomers, getPitchLibrary,
-  daysRemainingInQualification, getMyPayouts, LeadPayout,
+  daysRemainingInQualification, getMyPayouts,
   computeCycleProgress, paidPeriodsRemaining,
+  currentBlockNumber, daysRemainingInCurrentWindow, closeMyExpiredBlocks,
 } from '@/services/acquisitionService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
@@ -48,16 +49,37 @@ const LANDING_STEPS = [
 ];
 
 const QUAL_RULES = [
-  "Refer 76 paying customers and we send you an official invite to join NumVault as a Customer Acquisition Lead.",
+  "Refer 76 paying customers and we officially bring you on as a Customer Acquisition Lead.",
   "Go at your own pace — no daily targets. 1 a day or all 76 in a week, it's entirely up to you.",
-  "If your 30 days run out before you hit 76, your count resets and you can start fresh anytime — no hard feelings.",
+  "If your 30 days run out before you hit 76, your count resets and you can start fresh anytime.",
 ];
 
 const PAID_RULES = [
-  "You earn for every single paying customer you refer — whether it's 1 or 76. Every referral counts toward your pay.",
-  "Refer all 76 and your next paid month kicks off immediately — no waiting around.",
-  "Didn't hit 76 this month? No worries — you still get paid for every customer you brought in. Just re-qualify to start the next round.",
+  "You earn for every single paying customer you refer — whether it is 1 or 76. Every referral counts.",
+  "At 38 customers a half payout (₦50,000) goes under review. At 76, the second half (₦50,000) goes under review and your next block starts immediately.",
+  "Didn't hit 76 this block? No worries — you still get paid for every customer you brought in. Re-qualify to start the next round.",
 ];
+
+// ── Payout status display ────────────────────────────────────────────────────
+
+function payoutStatusLabel(status: string): { text: string; color: string; desc: string } {
+  switch (status) {
+    case 'under_review':
+      return { text: 'Under review', color: '#fbbf24', desc: 'We are checking these customers. We will notify you when it is approved.' };
+    case 'approved':
+      return { text: 'Approved', color: '#60a5fa', desc: 'Approved. Your payment is on its way.' };
+    case 'sent':
+      return { text: 'Paid', color: '#4ade80', desc: '' };
+    case 'held':
+      return { text: 'Held', color: '#fb923c', desc: 'Needs more review. Contact support.' };
+    case 'failed':
+      return { text: 'Failed', color: '#f87171', desc: 'There was a payment problem. We are retrying.' };
+    case 'pending':
+      return { text: 'Under review', color: '#fbbf24', desc: 'We are checking these customers. We will notify you when it is approved.' };
+    default:
+      return { text: status, color: '#4a7a4a', desc: '' };
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -104,23 +126,21 @@ export default function AcquisitionProgramScreen() {
 
   useEffect(() => { loadAll(); }, []);
 
-  // ── Auto-refresh polling while dashboard is visible ──────────────────────
-  // Silently refreshes participant count every 30 seconds so the dashboard
-  // updates automatically when a referral purchase is confirmed.
+  // ── Auto-refresh polling ─────────────────────────────────────────────────────
   useEffect(() => {
     if (screen !== 'dashboard' || !participant) return;
     const interval = setInterval(async () => {
       try {
-        const [freshP, freshRefs] = await Promise.all([
+        const [freshP, freshRefs, freshPays] = await Promise.all([
           getMyParticipant(),
-          participant ? getMyReferredCustomers(participant.id) : Promise.resolve([]),
+          getMyReferredCustomers(participant.id),
+          getMyPayouts(participant.id),
         ]);
         if (freshP) setParticipant(freshP);
         if (freshRefs) setReferred(freshRefs);
-      } catch {
-        // Silent — polling errors must not disrupt the UI
-      }
-    }, 30_000); // every 30 seconds
+        if (freshPays) setPayouts(freshPays as LeadPayout[]);
+      } catch { /* silent */ }
+    }, 30_000);
     return () => clearInterval(interval);
   }, [screen, participant?.id]);
 
@@ -132,10 +152,9 @@ export default function AcquisitionProgramScreen() {
     if (!p) { setAcqLaunchState('first_launch'); return; }
     const isActive =
       p.status === 'active_lead' ||
-      p.status === 'eligible_not_joined' ||
       (p.status === 'qualifying' && p.qualification_customers_count > 0 && isWithin30Days(p.qualification_start_date));
     const isDowngraded =
-      p.status === 'inactive' ||
+      p.status === 'inactive' || p.status === 'needs_requalification' ||
       (p.status === 'qualifying' && !isWithin30Days(p.qualification_start_date));
     setAcqLaunchState(isActive ? 'active_staff' : isDowngraded ? 'downgraded' : 'first_launch');
   }, []);
@@ -143,18 +162,19 @@ export default function AcquisitionProgramScreen() {
   const loadAll = async () => {
     try {
       setLoading(true);
+      // Close expired blocks before loading data
+      await closeMyExpiredBlocks().catch(() => {});
       const [p, lib] = await Promise.all([getMyParticipant(), getPitchLibrary()]);
       setPitches(lib);
       if (p) {
         setParticipant(p);
         resolveAcqLaunchState(p);
         setDestinationScreen('dashboard');
-        // Default tab based on status
         if (p.status === 'active_lead') setDashTab('onteam');
         else setDashTab('proving');
         const [refs, pays] = await Promise.all([getMyReferredCustomers(p.id), getMyPayouts(p.id)]);
         setReferred(refs);
-        setPayouts(pays);
+        setPayouts(pays as LeadPayout[]);
         setScreen('landing');
       } else {
         resolveAcqLaunchState(null);
@@ -229,7 +249,7 @@ export default function AcquisitionProgramScreen() {
         })
         .eq('id', participant.id);
       if (error) throw new Error(error.message);
-      showAlert('Bank Details Saved', 'Your bank account has been saved. The NumVault team will activate your Lead account.');
+      showAlert('Bank Details Saved', 'Your bank account has been saved. You can now receive payouts.');
       await loadAll();
       setScreen('dashboard');
     } catch (e: any) {
@@ -250,7 +270,6 @@ export default function AcquisitionProgramScreen() {
       setPayouts([]);
       setDashTab('proving');
       setScreen('dashboard');
-      // B1: Notify admin of new enrollment — fire-and-forget, never blocks UI
       (async () => {
         try {
           const { getSupabaseClient } = await import('@/template');
@@ -258,9 +277,7 @@ export default function AcquisitionProgramScreen() {
           await supabase.functions.invoke('notify-admin', {
             body: { action: 'enrollment', participant_name: enrollName.trim() },
           });
-        } catch {
-          // Non-blocking — admin notification failure must never surface to user
-        }
+        } catch { /* non-blocking */ }
       })();
     } catch (e: any) {
       showAlert('Enrollment failed', e.message || 'Please try again.');
@@ -296,7 +313,7 @@ export default function AcquisitionProgramScreen() {
     if (!participant?.referral_code) return;
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Share.share({
-      message: `Sign up on NumVault and use my referral code: ${participant.referral_code}\n\nNumVault gives you private phone numbers for any app or service — pay as you go, no subscription.`,
+      message: `Sign up on NumVault and use my referral code: ${participant.referral_code}\n\nNumVault gives you a private phone number for any app or service — pay as you go, no subscription.`,
       title: 'Join NumVault',
     });
   };
@@ -309,32 +326,48 @@ export default function AcquisitionProgramScreen() {
   const dismissWelcome = () => {
     Animated.timing(welcomeOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => {
       setShowWelcome(false);
-      setScreen('bank_onboarding');
+      // Show bank onboarding if no bank details yet
+      if (!participant?.bank_account_number) {
+        setScreen('bank_onboarding');
+      }
     });
   };
 
-  const daysLeft = daysRemainingInQualification(participant?.qualification_start_date ?? null);
+  // ── Derived state ────────────────────────────────────────────────────────────
+  const isQualified = participant?.status === 'active_lead' || participant?.status === 'contract_complete';
   const qualCount = participant?.qualification_customers_count ?? 0;
-  const windowExpired = daysLeft <= 0 && qualCount < 76 && participant?.status === 'qualifying';
-  const isQualified = participant?.status === 'active_lead' || participant?.status === 'eligible_not_joined';
 
-  // Use 30-day period from paid_period_start_date (not calendar month)
-  const cycleProgress = (() => {
-    if (!participant || !participant.paid_period_start_date) return null;
-    return computeCycleProgress(referred, participant.paid_period_start_date);
-  })();
+  // For qualifying tab: daysLeft is from qualification_start_date
+  // For active_lead tab: daysLeft is from paid_period_start_date
+  const daysLeft = daysRemainingInCurrentWindow(participant ?? { status: 'qualifying', qualification_start_date: null, paid_period_start_date: null } as unknown as AcquisitionParticipant);
+  const windowExpired =
+    daysLeft <= 0 &&
+    (participant?.status === 'qualifying' || participant?.status === 'needs_requalification') &&
+    qualCount < 76;
 
-  const c1 = Math.min(qualCount, 38);
-  const c2 = Math.max(0, qualCount - 38);
-
-  // Months remaining from paid_periods_completed — capped at 6
+  const blockNum = participant ? currentBlockNumber(participant) : 1;
   const monthsRemaining = paidPeriodsRemaining(participant ?? { paid_periods_completed: 0 } as AcquisitionParticipant);
   const potentialRemaining = monthsRemaining * 100000;
+
+  // Cycle counts from referred customers for current block
+  const cycleProgress = participant?.status === 'active_lead' && participant.paid_period_start_date
+    ? computeCycleProgress(referred, participant.paid_period_start_date, blockNum)
+    : null;
+
+  const c1 = cycleProgress?.cycle1Count ?? Math.min(qualCount, 38);
+  const c2 = cycleProgress?.cycle2Count ?? Math.max(0, qualCount - 38);
+
+  // Under review payouts for banner
+  const underReviewPayouts = payouts.filter((p) => p.status === 'under_review' || p.status === 'approved');
+  const underReviewTotal = underReviewPayouts.reduce((s, p) => s + Number(p.amount), 0);
+
+  // Whether to show bank details screen: active_lead with no bank on file
+  const needsBankDetails = participant?.status === 'active_lead' && !participant?.bank_account_number;
 
   if (loading) {
     return (
       <View style={[styles.container, styles.center, { paddingTop: insets.top }]}>
-        <ActivityIndicator color={styles.accent.color} size="large" />
+        <ActivityIndicator color={GREEN} size="large" />
       </View>
     );
   }
@@ -343,23 +376,23 @@ export default function AcquisitionProgramScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" backgroundColor="#0a0d0a" />
 
-      {/* ── WELCOME OVERLAY ── */}
+      {/* ── WELCOME OVERLAY (fires at 76th qualification customer) ── */}
       {showWelcome ? (
         <Animated.View style={[styles.welcomeOverlay, { opacity: welcomeOpacity }]}>
           <Text style={styles.welcomeEmoji}>🎉</Text>
           <Text style={styles.welcomeTitle}>You did it.</Text>
           <Text style={styles.welcomeSub}>
-            76 customers referred. You have proven yourself. Welcome to the NumVault team. Your Staff Dashboard is now available.
+            76 customers referred. You have proven yourself. Welcome to the NumVault team. Your Staff Dashboard is now active.
           </Text>
           <TouchableOpacity style={styles.welcomeBtn} onPress={dismissWelcome} activeOpacity={0.85}>
-            <Text style={styles.welcomeBtnText}>Proceed</Text>
+            <Text style={styles.welcomeBtnText}>Set up my bank account</Text>
           </TouchableOpacity>
         </Animated.View>
       ) : null}
 
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-          <MaterialIcons name="arrow-back" size={22} color="#4ade80" />
+          <MaterialIcons name="arrow-back" size={22} color={GREEN} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Customer Acquisition Lead</Text>
         <View style={{ width: 36 }} />
@@ -379,7 +412,7 @@ export default function AcquisitionProgramScreen() {
                 contentContainerStyle={styles.landingPage}>
                 <View style={styles.landingIconRow}>
                   <View style={styles.landingIconWrap}>
-                    <MaterialIcons name={step.icon} size={32} color="#4ade80" />
+                    <MaterialIcons name={step.icon} size={32} color={GREEN} />
                   </View>
                   <Text style={styles.landingStepLabel}>{step.label}</Text>
                 </View>
@@ -405,7 +438,12 @@ export default function AcquisitionProgramScreen() {
                   landingScrollRef.current?.scrollTo({ x: next * SCREEN_WIDTH, animated: true });
                   setLandingStep(next);
                 } else {
-                  setScreen(destinationScreen);
+                  // If active_lead and no bank details, show bank onboarding
+                  if (needsBankDetails) {
+                    setScreen('bank_onboarding');
+                  } else {
+                    setScreen(destinationScreen);
+                  }
                 }
               }}
               activeOpacity={0.85}
@@ -418,13 +456,12 @@ export default function AcquisitionProgramScreen() {
             </TouchableOpacity>
             {participant ? (
               <TouchableOpacity style={styles.backLink}
-                onPress={async () => { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setScreen('dashboard'); }}>
+                onPress={async () => {
+                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  if (needsBankDetails) setScreen('bank_onboarding');
+                  else setScreen('dashboard');
+                }}>
                 <Text style={styles.backLinkText}>Skip to my dashboard</Text>
-              </TouchableOpacity>
-            ) : acqLaunchState === 'active_staff' && landingStep < LANDING_STEPS.length - 1 ? (
-              <TouchableOpacity style={styles.backLink}
-                onPress={async () => { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setScreen('enroll'); }}>
-                <Text style={styles.backLinkText}>Skip intro</Text>
               </TouchableOpacity>
             ) : landingStep > 0 ? (
               <TouchableOpacity style={styles.backLink}
@@ -447,11 +484,11 @@ export default function AcquisitionProgramScreen() {
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             <View style={styles.heroCard}>
               <View style={styles.heroIcon}>
-                <MaterialIcons name="person-add" size={32} color="#4ade80" />
+                <MaterialIcons name="person-add" size={32} color={GREEN} />
               </View>
               <Text style={styles.heroTitle}>Enroll in the Program</Text>
               <Text style={styles.heroSub}>
-                Your enrollment starts a 30-day qualification window. Acquire 76 validated customers to qualify for the paid NumVault Lead opportunity.
+                Your enrollment starts a 30-day qualification window. Acquire 76 validated customers to become an active NumVault Lead.
               </Text>
             </View>
 
@@ -476,7 +513,7 @@ export default function AcquisitionProgramScreen() {
                 'You have 30 days to reach 76 validated customers.',
                 'Referral clicks and signups alone do not count.',
                 'Each customer must successfully purchase at least one number.',
-                'Your referral code will be generated automatically.',
+                'At 76 customers you automatically become an active lead — no review needed.',
               ].map((r, i) => (
                 <View key={i} style={styles.ruleRow}>
                   <View style={styles.ruleDot} />
@@ -521,10 +558,7 @@ export default function AcquisitionProgramScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.tabBtn, dashTab === 'onteam' && styles.tabBtnActive]}
-              onPress={async () => {
-                await Haptics.selectionAsync();
-                setDashTab('onteam');
-              }}
+              onPress={async () => { await Haptics.selectionAsync(); setDashTab('onteam'); }}
               activeOpacity={0.8}
             >
               <Text style={[styles.tabBtnText, dashTab === 'onteam' && styles.tabBtnTextActive]}>
@@ -538,7 +572,7 @@ export default function AcquisitionProgramScreen() {
             {dashTab === 'onteam' && !isQualified ? (
               <View style={styles.lockOverlay} pointerEvents="box-none">
                 <View style={styles.lockIconWrap}>
-                  <MaterialIcons name="lock" size={26} color="#4ade80" />
+                  <MaterialIcons name="lock" size={26} color={GREEN} />
                 </View>
                 <Text style={styles.lockTitle}>Staff Dashboard</Text>
                 <Text style={styles.lockSub}>
@@ -558,16 +592,25 @@ export default function AcquisitionProgramScreen() {
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 40 }}>
 
+                {/* ── UNDER REVIEW BANNER ── */}
+                {dashTab === 'onteam' && underReviewPayouts.length > 0 ? (
+                  <View style={styles.reviewBanner}>
+                    <MaterialIcons name="info-outline" size={14} color="#fbbf24" />
+                    <Text style={styles.reviewBannerText}>
+                      Your payout of ₦{underReviewTotal.toLocaleString()} is under review. Every payout is checked before it is sent.
+                    </Text>
+                  </View>
+                ) : null}
+
                 {/* ── PROVING YOURSELF tab ── */}
                 {dashTab === 'proving' && (
                   <>
-                    {/* Top card */}
                     <View style={styles.topCard}>
                       <View style={styles.topCardTop}>
                         <View style={styles.topCardLeft}>
                           <Text style={styles.topCardLabel}>Your proving ground</Text>
                           <Text style={styles.topCardHeadline}>
-                            Earn your <Text style={{ color: '#4ade80' }}>invite</Text>
+                            Earn your <Text style={{ color: GREEN }}>invite</Text>
                           </Text>
                           <Text style={styles.topCardSub}>76 customers. Unlock your income.</Text>
                         </View>
@@ -581,7 +624,7 @@ export default function AcquisitionProgramScreen() {
                       <View style={styles.topCardBottom}>
                         <View style={styles.topCardStat}>
                           <View style={styles.statIcon}>
-                            <MaterialIcons name="schedule" size={15} color="#4ade80" />
+                            <MaterialIcons name="schedule" size={15} color={GREEN} />
                           </View>
                           <View>
                             <Text style={styles.statLabel}>Your progress so far</Text>
@@ -590,38 +633,35 @@ export default function AcquisitionProgramScreen() {
                         </View>
                         <View style={[styles.topCardStat, styles.topCardStatBorder]}>
                           <View style={styles.statIcon}>
-                            <MaterialIcons name="calendar-today" size={15} color="#4ade80" />
+                            <MaterialIcons name="calendar-today" size={15} color={GREEN} />
                           </View>
                           <View>
-                            <Text style={styles.statLabel}>What you unlock at 76</Text>
-                            <Text style={styles.statValGreen}>₦100,000/month</Text>
+                            <Text style={styles.statLabel}>Days remaining</Text>
+                            <Text style={styles.statVal}>{daysLeft}</Text>
                           </View>
                         </View>
                       </View>
                     </View>
 
-                    {/* Requirements collapsible */}
                     <View style={styles.scard}>
                       <TouchableOpacity style={styles.scardHdr}
                         onPress={async () => { await Haptics.selectionAsync(); setReqOpen(!reqOpen); }}
                         activeOpacity={0.8}>
                         <View style={styles.scardIcon}>
-                          <MaterialIcons name="event-note" size={16} color="#4ade80" />
+                          <MaterialIcons name="event-note" size={16} color={GREEN} />
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.scardTitle}>Your 30-day challenge</Text>
                           <Text style={styles.scardSub}>Tap to see how it works</Text>
                         </View>
-                        <MaterialIcons
-                          name={reqOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-right'}
-                          size={20} color="#4a7a4a" />
+                        <MaterialIcons name={reqOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-right'} size={20} color={MUTED} />
                       </TouchableOpacity>
                       {reqOpen ? (
                         <View style={styles.scardBody}>
                           <Text style={styles.reqIntro}>
                             You have <Text style={{ color: '#fff', fontWeight: '600' }}>30 days</Text> to refer 76 paying customers.{' '}
-                            <Text style={{ color: '#4ade80', fontWeight: '600' }}>{qualCount}/76</Text> done —{' '}
-                            <Text style={{ color: '#4a7a4a' }}>{Math.max(0, 76 - qualCount)} to go.</Text>
+                            <Text style={{ color: GREEN, fontWeight: '600' }}>{qualCount}/76</Text> done —{' '}
+                            <Text style={{ color: MUTED }}>{Math.max(0, 76 - qualCount)} to go.</Text>
                           </Text>
                           {QUAL_RULES.map((r, i) => (
                             <View key={i} style={styles.ruleRow}>
@@ -647,62 +687,71 @@ export default function AcquisitionProgramScreen() {
                 {/* ── ON THE TEAM tab ── */}
                 {dashTab === 'onteam' && isQualified && (
                   <>
-                    {/* Top card */}
+                    {/* Bank details nudge */}
+                    {needsBankDetails ? (
+                      <TouchableOpacity
+                        style={styles.bankNudge}
+                        onPress={() => setScreen('bank_onboarding')}
+                        activeOpacity={0.85}
+                      >
+                        <MaterialIcons name="account-balance" size={16} color="#fbbf24" />
+                        <Text style={styles.bankNudgeText}>
+                          Add your bank account to receive payouts
+                        </Text>
+                        <MaterialIcons name="chevron-right" size={16} color="#fbbf24" />
+                      </TouchableOpacity>
+                    ) : null}
+
                     <View style={styles.topCard}>
                       <View style={styles.topCardTop}>
                         <View style={styles.topCardLeft}>
-                          <Text style={styles.topCardLabel}>You are on the team</Text>
+                          <Text style={styles.topCardLabel}>Block {blockNum} of 6</Text>
                           <Text style={styles.topCardHeadline}>
-                            {monthsRemaining} months <Text style={{ color: '#4ade80' }}>remaining</Text>
+                            {monthsRemaining} blocks <Text style={{ color: GREEN }}>remaining</Text>
                           </Text>
-                          <Text style={styles.topCardSub}>Make the most of your time with us.</Text>
+                          <Text style={styles.topCardSub}>{daysLeft} days in this block.</Text>
                         </View>
                         <View style={styles.topCardRight}>
-                          <Text style={styles.topCardLabel}>Your total potential</Text>
+                          <Text style={styles.topCardLabel}>Potential remaining</Text>
                           <Text style={styles.topCardBig}>₦{potentialRemaining.toLocaleString()}</Text>
-                          <Text style={styles.topCardBigSub}>remaining potential</Text>
+                          <Text style={styles.topCardBigSub}>across {monthsRemaining} blocks</Text>
                         </View>
                       </View>
                       <View style={styles.topCardDivider} />
                       <View style={styles.topCardBottom}>
                         <View style={styles.topCardStat}>
                           <View style={styles.statIcon}>
-                            <MaterialIcons name="schedule" size={15} color="#4ade80" />
+                            <MaterialIcons name="schedule" size={15} color={GREEN} />
                           </View>
                           <View>
-                            <Text style={styles.statLabel}>Customers this month</Text>
+                            <Text style={styles.statLabel}>Customers this block</Text>
                             <Text style={styles.statVal}>{qualCount} / 76</Text>
                           </View>
                         </View>
                         <View style={[styles.topCardStat, styles.topCardStatBorder]}>
                           <View style={styles.statIcon}>
-                            <MaterialIcons name="payments" size={15} color="#4ade80" />
+                            <MaterialIcons name="people" size={15} color={GREEN} />
                           </View>
                           <View>
-                            <Text style={styles.statLabel}>Earned this month</Text>
-                            <Text style={styles.statValGreen}>
-                              ₦{Math.round(100000 * Math.min(qualCount, 76) / 76).toLocaleString()}
-                            </Text>
+                            <Text style={styles.statLabel}>Days remaining</Text>
+                            <Text style={styles.statVal}>{daysLeft}</Text>
                           </View>
                         </View>
                       </View>
                     </View>
 
-                    {/* Requirements collapsible (paid rules) */}
                     <View style={styles.scard}>
                       <TouchableOpacity style={styles.scardHdr}
                         onPress={async () => { await Haptics.selectionAsync(); setReqOpen(!reqOpen); }}
                         activeOpacity={0.8}>
                         <View style={styles.scardIcon}>
-                          <MaterialIcons name="event-note" size={16} color="#4ade80" />
+                          <MaterialIcons name="event-note" size={16} color={GREEN} />
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.scardTitle}>Your monthly target — 30 days</Text>
+                          <Text style={styles.scardTitle}>Your 30-day block — Block {blockNum}</Text>
                           <Text style={styles.scardSub}>Tap to see how it works</Text>
                         </View>
-                        <MaterialIcons
-                          name={reqOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-right'}
-                          size={20} color="#4a7a4a" />
+                        <MaterialIcons name={reqOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-right'} size={20} color={MUTED} />
                       </TouchableOpacity>
                       {reqOpen ? (
                         <View style={styles.scardBody}>
@@ -716,9 +765,9 @@ export default function AcquisitionProgramScreen() {
                           <View style={styles.payNotice}>
                             <Text style={styles.payNoticeTitle}>How your pay works</Text>
                             <Text style={styles.payNoticeBody}>
-                              <Text style={{ color: '#4ade80' }}>①</Text> Your 30-day period starts now.{'\n'}
-                              <Text style={{ color: '#4ade80' }}>②</Text> At the end of 30 days we count your customers and pay you. You earn ₦100,000 for a full 76 — in two batches of ₦50,000 — one at 38 customers and one at 76. Both can land in one day if you hit 76 quickly.{'\n'}
-                              <Text style={{ color: '#4ade80' }}>③</Text> If you do not meet your target you will be downgraded to proving yourself again.
+                              <Text style={{ color: GREEN }}>①</Text> Your 30-day block started when you qualified.{'\n'}
+                              <Text style={{ color: GREEN }}>②</Text> At 38 customers, ₦50,000 goes under review. At 76, another ₦50,000 goes under review and your next block starts.{'\n'}
+                              <Text style={{ color: GREEN }}>③</Text> If your block closes before 76, you are paid proportionally for what you achieved and asked to re-qualify for the next block.
                             </Text>
                           </View>
                         </View>
@@ -729,21 +778,15 @@ export default function AcquisitionProgramScreen() {
 
                 {/* ── CYCLES (both tabs) ── */}
                 <View style={styles.cycWrap}>
-                  {/* Cycle 1 — First half */}
                   <View style={styles.cycRow}>
                     <View style={styles.cycIcon}>
-                      <MaterialIcons name="people" size={16} color="#4ade80" />
+                      <MaterialIcons name="people" size={16} color={GREEN} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <View style={styles.cycMeta}>
                         <View>
                           <Text style={styles.cycName}>First half</Text>
                           <Text style={styles.cycCt}>{c1} / 38</Text>
-                          {dashTab === 'onteam' && isQualified ? (
-                            <Text style={styles.cycEarn}>
-                              Earned ₦{Math.round(50000 * c1 / 38).toLocaleString()} / ₦50,000 max
-                            </Text>
-                          ) : null}
                         </View>
                         <View style={{ alignItems: 'flex-end' }}>
                           <Text style={styles.cycRange}>customers 1–38</Text>
@@ -758,34 +801,24 @@ export default function AcquisitionProgramScreen() {
                     </View>
                   </View>
 
-                  {/* Cycle 2 — Second half (dropdown) */}
                   <TouchableOpacity style={styles.cyc2Trigger}
                     onPress={async () => { await Haptics.selectionAsync(); setC2Open(!c2Open); }}
                     activeOpacity={0.8}>
                     <View style={[styles.cycIcon, { width: 32, height: 32 }]}>
-                      <MaterialIcons name="people" size={14} color="#4ade80" />
+                      <MaterialIcons name="people" size={14} color={GREEN} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.cyc2Label}>Second half</Text>
                       <Text style={styles.cyc2Sub}>{c2} / 38 · customers 39–76</Text>
                     </View>
-                    <MaterialIcons
-                      name={c2Open ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
-                      size={18} color="#4a7a4a" />
+                    <MaterialIcons name={c2Open ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} size={18} color={MUTED} />
                   </TouchableOpacity>
 
                   {c2Open ? (
                     <View style={styles.cyc2Body}>
                       <View style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
                         <View style={styles.cycMeta}>
-                          <View>
-                            <Text style={styles.cycCt}>{c2} / 38</Text>
-                            {dashTab === 'onteam' && isQualified ? (
-                              <Text style={styles.cycEarn}>
-                                Earned ₦{Math.round(50000 * c2 / 38).toLocaleString()} / ₦50,000 max
-                              </Text>
-                            ) : null}
-                          </View>
+                          <Text style={styles.cycCt}>{c2} / 38</Text>
                           <Text style={styles.cycPct}>{Math.round(c2 / 38 * 100)}%</Text>
                         </View>
                         <SegBar filled={c2} total={38} />
@@ -802,7 +835,7 @@ export default function AcquisitionProgramScreen() {
                 <View style={styles.refCard}>
                   <View style={styles.refTop}>
                     <View style={styles.refIcon}>
-                      <MaterialIcons name="link" size={16} color="#4ade80" />
+                      <MaterialIcons name="link" size={16} color={GREEN} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.refLabel}>Your referral code</Text>
@@ -814,17 +847,25 @@ export default function AcquisitionProgramScreen() {
                     <Text style={styles.copyBtnLargeText}>{copiedCode ? 'Copied!' : 'Copy Code'}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.shareBtn} onPress={shareCode} activeOpacity={0.85}>
-                    <MaterialIcons name="share" size={15} color="#4ade80" />
+                    <MaterialIcons name="share" size={15} color={GREEN} />
                     <Text style={styles.shareBtnText}>Share referral code</Text>
                   </TouchableOpacity>
                 </View>
 
-                {/* Window expired re-enroll */}
-                {windowExpired && dashTab === 'proving' ? (
+                {/* Re-enroll button */}
+                {(windowExpired || participant.status === 'needs_requalification') && dashTab === 'proving' ? (
                   <View style={{ paddingHorizontal: 16 }}>
+                    {participant.status === 'needs_requalification' ? (
+                      <View style={styles.requalCard}>
+                        <MaterialIcons name="info" size={14} color="#fb923c" />
+                        <Text style={styles.requalText}>
+                          Your last block closed without reaching 76. Re-enroll to start your next qualification round.
+                        </Text>
+                      </View>
+                    ) : null}
                     <TouchableOpacity style={styles.reEnrollBtn} onPress={handleReEnroll} activeOpacity={0.85}>
                       <MaterialIcons name="refresh" size={18} color="#061006" />
-                      <Text style={styles.reEnrollText}>Enroll Again (Reset 0/76)</Text>
+                      <Text style={styles.reEnrollText}>Re-enroll (Reset 0/76)</Text>
                     </TouchableOpacity>
                   </View>
                 ) : null}
@@ -836,21 +877,19 @@ export default function AcquisitionProgramScreen() {
                       onPress={async () => { await Haptics.selectionAsync(); setPitchOpen(!pitchOpen); }}
                       activeOpacity={0.8}>
                       <View style={styles.cycIcon}>
-                        <MaterialIcons name="chat-bubble-outline" size={16} color="#4ade80" />
+                        <MaterialIcons name="chat-bubble-outline" size={16} color={GREEN} />
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.pitchTitle}>How to talk about NumVault</Text>
                       </View>
-                      <MaterialIcons
-                        name={pitchOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
-                        size={18} color="#4a7a4a" />
+                      <MaterialIcons name={pitchOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} size={18} color={MUTED} />
                     </TouchableOpacity>
                     {pitchOpen ? (
                       <View style={styles.pitchBody}>
                         {pitches.map((p) => (
                           <View key={p.id} style={styles.pitchItem}>
                             <View style={styles.piIcon}>
-                              <MaterialIcons name="person" size={14} color="#4ade80" />
+                              <MaterialIcons name="person" size={14} color={GREEN} />
                             </View>
                             <View style={{ flex: 1 }}>
                               <View style={styles.piTag}>
@@ -866,35 +905,44 @@ export default function AcquisitionProgramScreen() {
                   </View>
                 ) : null}
 
-                {/* Payout history (on the team only) */}
+                {/* ── PAYOUTS section (on the team only) ── */}
                 {dashTab === 'onteam' && isQualified && payouts.length > 0 ? (
                   <View style={{ paddingHorizontal: 16, gap: 8 }}>
-                    <Text style={styles.payoutSectionTitle}>Payout History</Text>
-                    {payouts.map((pout) => (
-                      <View key={pout.id} style={styles.payoutRow}>
-                        <View style={[styles.payoutIconWrap, {
-                          backgroundColor: pout.status === 'sent' ? '#0d2a0d' : pout.status === 'failed' ? '#2a0d0d' : '#111a11'
-                        }]}>
-                          <MaterialIcons
-                            name={pout.status === 'sent' ? 'check-circle' : pout.status === 'failed' ? 'error' : 'pending'}
-                            size={16}
-                            color={pout.status === 'sent' ? '#4ade80' : pout.status === 'failed' ? '#f87171' : '#4a7a4a'}
-                          />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.payoutLabel}>
-                            Cycle {pout.cycle_number} · {new Date(pout.monthly_window_start).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })}
+                    <Text style={styles.payoutSectionTitle}>Payouts</Text>
+                    {payouts.map((pout) => {
+                      const meta = payoutStatusLabel(pout.status);
+                      const isSent = pout.status === 'sent';
+                      return (
+                        <View key={pout.id} style={[styles.payoutRow, { borderColor: meta.color + '44' }]}>
+                          <View style={[styles.payoutIconWrap, { backgroundColor: meta.color + '18' }]}>
+                            <MaterialIcons
+                              name={isSent ? 'check-circle' : pout.status === 'failed' || pout.status === 'held' ? 'error' : 'pending'}
+                              size={16}
+                              color={meta.color}
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                              <Text style={styles.payoutLabel}>
+                                Block {pout.block_number ?? '?'} · Half {pout.cycle_number}
+                              </Text>
+                              <View style={[styles.payoutChip, { backgroundColor: meta.color + '22', borderColor: meta.color + '55' }]}>
+                                <Text style={[styles.payoutChipText, { color: meta.color }]}>{meta.text}</Text>
+                              </View>
+                            </View>
+                            <Text style={styles.payoutMeta}>
+                              {isSent && pout.sent_at
+                                ? `Paid on ${new Date(pout.sent_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                                : meta.desc}
+                            </Text>
+                            <Text style={styles.payoutCustomers}>{pout.customers_in_cycle} customers</Text>
+                          </View>
+                          <Text style={[styles.payoutAmount, { color: isSent ? GREEN : '#fff' }]}>
+                            ₦{Number(pout.amount).toLocaleString()}
                           </Text>
-                          <Text style={styles.payoutMeta}>
-                            {pout.status === 'sent' ? `Sent ${new Date(pout.sent_at!).toLocaleDateString()}` :
-                              pout.status === 'failed' ? (pout.failure_reason || 'Transfer failed') : 'Pending transfer'}
-                          </Text>
                         </View>
-                        <Text style={[styles.payoutAmount, { color: pout.status === 'sent' ? '#4ade80' : '#fff' }]}>
-                          ₦{Number(pout.amount).toLocaleString()}
-                        </Text>
-                      </View>
-                    ))}
+                      );
+                    })}
                   </View>
                 ) : null}
 
@@ -910,21 +958,20 @@ export default function AcquisitionProgramScreen() {
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             <View style={styles.heroCard}>
               <View style={[styles.heroIcon, { backgroundColor: '#0d2a0d' }]}>
-                <MaterialIcons name="account-balance" size={36} color="#4ade80" />
+                <MaterialIcons name="account-balance" size={36} color={GREEN} />
               </View>
               <Text style={styles.heroTitle}>Set up your payout</Text>
               <Text style={styles.heroSub}>
-                Almost there. Add your bank details so we can pay you directly. We will verify your account name through Paystack to make sure everything is correct.
+                Add your bank details so we can pay you directly. We will verify your account name through Paystack.
               </Text>
             </View>
 
-            {/* How your pay works notice */}
             <View style={styles.payNotice}>
               <Text style={styles.payNoticeTitle}>How your pay works</Text>
               <Text style={styles.payNoticeBody}>
-                <Text style={{ color: '#4ade80' }}>①</Text> Your 30-day period starts now.{'\n'}
-                <Text style={{ color: '#4ade80' }}>②</Text> At the end of 30 days we count your customers and pay you — whether that is 1, 38, or the full 76. You earn ₦100,000 for a full 76 in two batches of ₦50,000.{'\n'}
-                <Text style={{ color: '#4ade80' }}>③</Text> You keep access to your Staff Dashboard. But if you do not meet your target you will be downgraded to proving yourself again.
+                <Text style={{ color: GREEN }}>①</Text> Your 30-day block is now running.{'\n'}
+                <Text style={{ color: GREEN }}>②</Text> At 38 customers, ₦50,000 goes under admin review. At 76, another ₦50,000 goes under review and your next block starts immediately.{'\n'}
+                <Text style={{ color: GREEN }}>③</Text> We will push you a notification when each payout is approved.
               </Text>
             </View>
 
@@ -982,17 +1029,16 @@ export default function AcquisitionProgramScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.backLink} onPress={() => setScreen('dashboard')}>
-              <Text style={styles.backLinkText}>Back</Text>
+              <Text style={styles.backLinkText}>Set up later</Text>
             </TouchableOpacity>
             <View style={{ height: 40 }} />
           </ScrollView>
 
-          {/* Bank picker modal */}
           <Modal visible={showBankPicker} animationType="slide" onRequestClose={() => setShowBankPicker(false)}>
             <View style={[styles.container, { paddingTop: insets.top }]}>
               <View style={styles.header}>
                 <TouchableOpacity style={styles.backBtn} onPress={() => setShowBankPicker(false)} activeOpacity={0.7}>
-                  <MaterialIcons name="close" size={22} color="#4ade80" />
+                  <MaterialIcons name="close" size={22} color={GREEN} />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Select Bank</Text>
                 <View style={{ width: 36 }} />
@@ -1000,8 +1046,7 @@ export default function AcquisitionProgramScreen() {
               <ScrollView showsVerticalScrollIndicator={false}>
                 {bankList.length === 0 ? (
                   <View style={[styles.center, { padding: Spacing.xl }]}>
-                    <ActivityIndicator color="#4ade80" />
-                    <Text style={[styles.formHint, { marginTop: Spacing.sm }]}>Loading banks...</Text>
+                    <ActivityIndicator color={GREEN} />
                   </View>
                 ) : (
                   bankList.map((bank) => (
@@ -1011,8 +1056,8 @@ export default function AcquisitionProgramScreen() {
                       onPress={() => { setSelectedBank(bank); setResolvedAccountName(null); setShowBankPicker(false); }}
                       activeOpacity={0.8}
                     >
-                      <Text style={[styles.bankName, selectedBank?.code === bank.code && { color: '#4ade80' }]}>{bank.name}</Text>
-                      {selectedBank?.code === bank.code ? <MaterialIcons name="check" size={16} color="#4ade80" /> : null}
+                      <Text style={[styles.bankName, selectedBank?.code === bank.code && { color: GREEN }]}>{bank.name}</Text>
+                      {selectedBank?.code === bank.code ? <MaterialIcons name="check" size={16} color={GREEN} /> : null}
                     </TouchableOpacity>
                   ))
                 )}
@@ -1025,7 +1070,7 @@ export default function AcquisitionProgramScreen() {
   );
 }
 
-// ── Segmented bar component ────────────────────────────────────────────────────
+// ── Segmented bar ─────────────────────────────────────────────────────────────
 
 function SegBar({ filled, total }: { filled: number; total: number }) {
   const segments = Array.from({ length: total }, (_, i) => i < filled);
@@ -1064,7 +1109,6 @@ const TEXT = '#fff';
 const TEXT2 = '#a0c0a0';
 
 const styles = StyleSheet.create({
-  // generic
   accent: { color: GREEN },
   container: { flex: 1, backgroundColor: BG },
   center: { alignItems: 'center', justifyContent: 'center' },
@@ -1080,7 +1124,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { color: TEXT, fontSize: 20, fontWeight: '700' },
 
-  // WELCOME OVERLAY
   welcomeOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(5,10,5,0.96)', zIndex: 200,
@@ -1089,29 +1132,18 @@ const styles = StyleSheet.create({
   },
   welcomeEmoji: { fontSize: 60, marginBottom: 20 },
   welcomeTitle: { fontSize: 28, fontWeight: '700', color: GREEN, marginBottom: 12 },
-  welcomeSub: {
-    fontSize: 14, color: TEXT2, lineHeight: 24,
-    textAlign: 'center', maxWidth: 290, marginBottom: 28,
-  },
-  welcomeBtn: {
-    backgroundColor: GREEN, borderRadius: 100, paddingHorizontal: 48, paddingVertical: 15,
-  },
+  welcomeSub: { fontSize: 14, color: TEXT2, lineHeight: 24, textAlign: 'center', maxWidth: 290, marginBottom: 28 },
+  welcomeBtn: { backgroundColor: GREEN, borderRadius: 100, paddingHorizontal: 48, paddingVertical: 15 },
   welcomeBtnText: { color: '#061006', fontSize: 15, fontWeight: '700' },
 
-  // LANDING
-  landingPage: {
-    width: SCREEN_WIDTH, padding: 20, paddingTop: 32, gap: 20,
-  },
+  landingPage: { width: SCREEN_WIDTH, padding: 20, paddingTop: 32, gap: 20 },
   landingIconRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   landingIconWrap: {
     width: 56, height: 56, borderRadius: 28,
     backgroundColor: '#0d2a0d', borderWidth: 1, borderColor: '#1a5a1a',
     alignItems: 'center', justifyContent: 'center',
   },
-  landingStepLabel: {
-    color: GREEN, fontSize: 11, fontWeight: '700',
-    letterSpacing: 1.2, textTransform: 'uppercase',
-  },
+  landingStepLabel: { color: GREEN, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
   landingTitle: { color: TEXT, fontSize: 24, fontWeight: '700', lineHeight: 32 },
   landingBody: { color: TEXT2, fontSize: 15, lineHeight: 26 },
   landingFooter: {
@@ -1122,7 +1154,6 @@ const styles = StyleSheet.create({
   landingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: BORDER },
   landingDotActive: { width: 20, backgroundColor: GREEN },
 
-  // TABS
   tabsRow: {
     flexDirection: 'row', marginHorizontal: 16, marginBottom: 14,
     backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER2,
@@ -1133,11 +1164,9 @@ const styles = StyleSheet.create({
   tabBtnText: { fontSize: 13, fontWeight: '500', color: MUTED },
   tabBtnTextActive: { color: GREEN, fontWeight: '600' },
 
-  // LOCK OVERLAY
   lockOverlay: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 32,
-    backgroundColor: 'rgba(5,10,5,0.82)',
+    paddingHorizontal: 32, backgroundColor: 'rgba(5,10,5,0.82)',
   },
   lockIconWrap: {
     width: 60, height: 60, borderRadius: 30,
@@ -1154,13 +1183,23 @@ const styles = StyleSheet.create({
   lockCode: { fontSize: 22, fontWeight: '700', color: GREEN, letterSpacing: 3 },
   lockBrand: { fontSize: 10, color: MUTED2, marginTop: 3 },
   lockSub2: { fontSize: 12, color: MUTED2, marginBottom: 20 },
-  lockBtn: {
-    backgroundColor: '#1a5a2a', borderRadius: 100,
-    paddingHorizontal: 32, paddingVertical: 12,
-  },
+  lockBtn: { backgroundColor: '#1a5a2a', borderRadius: 100, paddingHorizontal: 32, paddingVertical: 12 },
   lockBtnText: { color: GREEN, fontSize: 13, fontWeight: '600' },
 
-  // TOP CARD
+  reviewBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(251,191,36,0.1)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.35)',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginHorizontal: 16,
+  },
+  reviewBannerText: { flex: 1, color: '#fbbf24', fontSize: 12, lineHeight: 18 },
+
+  bankNudge: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(251,191,36,0.08)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.35)',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginHorizontal: 16,
+  },
+  bankNudgeText: { flex: 1, color: '#fbbf24', fontSize: 12 },
+
   topCard: {
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
     borderRadius: 16, padding: 18, marginHorizontal: 16,
@@ -1186,7 +1225,6 @@ const styles = StyleSheet.create({
   statVal: { fontSize: 18, fontWeight: '700', color: TEXT },
   statValGreen: { fontSize: 15, fontWeight: '700', color: GREEN },
 
-  // SCARD (collapsible section)
   scard: {
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
     borderRadius: 16, marginHorizontal: 16, overflow: 'hidden',
@@ -1205,8 +1243,7 @@ const styles = StyleSheet.create({
   reqIntro: { fontSize: 12, color: TEXT2, lineHeight: 20, marginBottom: 6 },
   reqQ: { fontSize: 12, fontWeight: '600', color: GREEN, marginBottom: 8 },
   vbox: {
-    backgroundColor: '#0f2a0f', borderWidth: 1, borderColor: '#1e4a1e',
-    borderRadius: 10, padding: 12,
+    backgroundColor: '#0f2a0f', borderWidth: 1, borderColor: '#1e4a1e', borderRadius: 10, padding: 12,
   },
   vboxTitle: { fontSize: 11, fontWeight: '600', color: GREEN, marginBottom: 6 },
   vboxBody: { fontSize: 11, color: TEXT2, lineHeight: 22 },
@@ -1219,7 +1256,6 @@ const styles = StyleSheet.create({
   payNoticeTitle: { fontSize: 12, fontWeight: '600', color: GREEN, marginBottom: 8 },
   payNoticeBody: { fontSize: 12, color: TEXT2, lineHeight: 22 },
 
-  // CYCLES
   cycWrap: {
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
     borderRadius: 16, marginHorizontal: 16, overflow: 'hidden',
@@ -1233,7 +1269,6 @@ const styles = StyleSheet.create({
   cycMeta: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 },
   cycName: { fontSize: 14, fontWeight: '600', color: TEXT, marginBottom: 3 },
   cycCt: { fontSize: 22, fontWeight: '700', color: TEXT, lineHeight: 26 },
-  cycEarn: { fontSize: 11, color: MUTED, marginTop: 3 },
   cycRange: { fontSize: 11, color: MUTED, marginBottom: 3 },
   cycPct: { fontSize: 18, fontWeight: '700', color: GREEN },
   barFt: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 },
@@ -1241,14 +1276,12 @@ const styles = StyleSheet.create({
 
   cyc2Trigger: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    padding: 12, paddingLeft: 14,
-    borderTopWidth: 1, borderTopColor: BORDER,
+    padding: 12, paddingLeft: 14, borderTopWidth: 1, borderTopColor: BORDER,
   },
   cyc2Label: { fontSize: 13, fontWeight: '500', color: TEXT },
   cyc2Sub: { fontSize: 11, color: MUTED, marginTop: 1 },
   cyc2Body: { borderTopWidth: 1, borderTopColor: BORDER },
 
-  // REFERRAL
   refCard: {
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
     borderRadius: 16, marginHorizontal: 16, padding: 16, gap: 14,
@@ -1273,14 +1306,19 @@ const styles = StyleSheet.create({
   },
   shareBtnText: { color: GREEN, fontSize: 13, fontWeight: '600' },
 
-  // RE-ENROLL
+  requalCard: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    backgroundColor: 'rgba(251,146,60,0.1)', borderWidth: 1, borderColor: 'rgba(251,146,60,0.35)',
+    borderRadius: 12, padding: 12, marginBottom: 10,
+  },
+  requalText: { flex: 1, color: '#fb923c', fontSize: 12, lineHeight: 18 },
+
   reEnrollBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 8, backgroundColor: '#b45309', borderRadius: 100, height: 50,
   },
   reEnrollText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 
-  // PITCH LIBRARY
   pitchWrap: {
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
     borderRadius: 16, marginHorizontal: 16, overflow: 'hidden',
@@ -1307,19 +1345,22 @@ const styles = StyleSheet.create({
   pitchHeadline: { fontSize: 12, color: TEXT, fontWeight: '500', marginBottom: 3, lineHeight: 18 },
   pitchBodyTxt: { fontSize: 11, color: TEXT2, lineHeight: 18 },
 
-  // PAYOUT HISTORY
   payoutSectionTitle: { fontSize: 15, fontWeight: '700', color: TEXT, marginBottom: 4 },
   payoutRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: SURFACE, borderWidth: 1,
     borderRadius: 12, padding: 14,
   },
-  payoutIconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  payoutIconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   payoutLabel: { fontSize: 13, fontWeight: '600', color: TEXT },
-  payoutMeta: { fontSize: 11, color: MUTED, marginTop: 2 },
-  payoutAmount: { fontSize: 14, fontWeight: '700' },
+  payoutMeta: { fontSize: 11, color: MUTED, marginTop: 2, lineHeight: 16 },
+  payoutCustomers: { fontSize: 10, color: MUTED2, marginTop: 2 },
+  payoutAmount: { fontSize: 14, fontWeight: '700', flexShrink: 0 },
+  payoutChip: {
+    borderWidth: 1, borderRadius: 100, paddingHorizontal: 7, paddingVertical: 2,
+  },
+  payoutChipText: { fontSize: 10, fontWeight: '700' },
 
-  // ENROLL / BANK FORMS
   content: { padding: 20, gap: 20 },
   heroCard: {
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
@@ -1335,8 +1376,7 @@ const styles = StyleSheet.create({
 
   ctaBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, backgroundColor: GREEN, borderRadius: 100, height: 52,
-    marginHorizontal: 16,
+    gap: 8, backgroundColor: GREEN, borderRadius: 100, height: 52, marginHorizontal: 16,
   },
   ctaBtnDisabled: { opacity: 0.4 },
   ctaBtnText: { color: '#061006', fontSize: 14, fontWeight: '700' },
@@ -1345,13 +1385,10 @@ const styles = StyleSheet.create({
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER,
     borderRadius: 16, padding: 16, gap: 10,
   },
-  formLabel: {
-    fontSize: 10, color: MUTED2, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2,
-  },
+  formLabel: { fontSize: 10, color: MUTED2, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
   formInput: {
     backgroundColor: '#0d1f0d', borderWidth: 1, borderColor: BORDER,
-    borderRadius: 12, paddingHorizontal: 14, height: 50,
-    color: TEXT, fontSize: 14,
+    borderRadius: 12, paddingHorizontal: 14, height: 50, color: TEXT, fontSize: 14,
   },
   formHint: { fontSize: 11, color: MUTED2, lineHeight: 18 },
 
@@ -1367,7 +1404,6 @@ const styles = StyleSheet.create({
   backLink: { alignItems: 'center', paddingVertical: 10 },
   backLinkText: { color: MUTED, fontSize: 13 },
 
-  // BANK ONBOARDING
   lookupBtn: {
     backgroundColor: '#1a5a2a', borderRadius: 100, height: 50,
     alignItems: 'center', justifyContent: 'center', marginTop: 8,
