@@ -104,6 +104,26 @@ export default function AcquisitionProgramScreen() {
 
   useEffect(() => { loadAll(); }, []);
 
+  // ── Auto-refresh polling while dashboard is visible ──────────────────────
+  // Silently refreshes participant count every 30 seconds so the dashboard
+  // updates automatically when a referral purchase is confirmed.
+  useEffect(() => {
+    if (screen !== 'dashboard' || !participant) return;
+    const interval = setInterval(async () => {
+      try {
+        const [freshP, freshRefs] = await Promise.all([
+          getMyParticipant(),
+          participant ? getMyReferredCustomers(participant.id) : Promise.resolve([]),
+        ]);
+        if (freshP) setParticipant(freshP);
+        if (freshRefs) setReferred(freshRefs);
+      } catch {
+        // Silent — polling errors must not disrupt the UI
+      }
+    }, 30_000); // every 30 seconds
+    return () => clearInterval(interval);
+  }, [screen, participant?.id]);
+
   useEffect(() => {
     if (screen === 'bank_onboarding' && bankList.length === 0) loadBankList();
   }, [screen]);

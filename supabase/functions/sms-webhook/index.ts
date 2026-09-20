@@ -180,6 +180,73 @@ async function processAcquisitionValidation(
   }
 }
 
+// ── Expo push notification ──────────────────────────────────────────────────────
+
+async function sendReferralPushNotification(
+  supabase: ReturnType<typeof createClient>,
+  participantId: string,
+  newCount: number
+) {
+  try {
+    // Get participant's user_id
+    const { data: participant } = await supabase
+      .from('acquisition_participants')
+      .select('user_id, name')
+      .eq('id', participantId)
+      .maybeSingle();
+
+    if (!participant?.user_id) return;
+
+    // Get their push token
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('push_token')
+      .eq('id', participant.user_id)
+      .maybeSingle();
+
+    const pushToken = profile?.push_token;
+    if (!pushToken || !pushToken.startsWith('ExponentPushToken[')) return;
+
+    // Build notification message based on progress
+    let title = '🎉 New referral confirmed!';
+    let body = `Customer #${newCount} validated. ${76 - newCount} more to go to unlock your Staff Dashboard.`;
+
+    if (newCount >= 76) {
+      title = '🏆 You did it! 76 customers reached!';
+      body = 'Your eligibility review has been submitted. The NumVault team will review and activate your account.';
+    } else if (newCount === 38) {
+      title = '⚡ Halfway there!';
+      body = `38 customers confirmed! Keep going — just 38 more to unlock your ₦100,000/month income.`;
+    } else if (newCount >= 70) {
+      title = `🔥 Almost there! ${newCount}/76`;
+      body = `Only ${76 - newCount} more validated customers to unlock your Staff Dashboard.`;
+    }
+
+    // POST to Expo push endpoint
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: pushToken,
+        title,
+        body,
+        data: { type: 'referral_confirmed', count: newCount, participant_id: participantId },
+        sound: 'default',
+        priority: 'high',
+      }),
+    });
+
+    const result = await response.json();
+    console.log(`Push notification sent to participant ${participantId} (count: ${newCount}):`, result?.data?.status);
+  } catch (err) {
+    // Non-blocking — notification failure must never interrupt webhook processing
+    console.error('Failed to send referral push notification:', err);
+  }
+}
+
 // ── Count increment with business rule enforcement ────────────────────────────
 
 async function applyCountIncrement(
@@ -218,8 +285,11 @@ async function applyCountIncrement(
       .update(updates)
       .eq('id', participant.id);
 
-    if (error) console.error('Failed to update participant count:', error);
-    else console.log(`Participant ${participant.id} count: ${newCount}`);
+    if (error) { console.error('Failed to update participant count:', error); return; }
+    console.log(`Participant ${participant.id} count: ${newCount}`);
+
+    // Fire push notification (non-blocking)
+    sendReferralPushNotification(supabase, participant.id, newCount);
     return;
   }
 
@@ -239,8 +309,11 @@ async function applyCountIncrement(
       .update({ qualification_customers_count: newCount })
       .eq('id', participant.id);
 
-    if (error) console.error('Failed to update active lead count:', error);
-    else console.log(`Active lead ${participant.id} period count: ${newCount}`);
+    if (error) { console.error('Failed to update active lead count:', error); return; }
+    console.log(`Active lead ${participant.id} period count: ${newCount}`);
+
+    // Fire push notification for active leads too
+    sendReferralPushNotification(supabase, participant.id, newCount);
     return;
   }
 
