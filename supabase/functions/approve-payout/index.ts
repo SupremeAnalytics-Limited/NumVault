@@ -2,14 +2,18 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
 
 /**
- * approve-payout — approves or rejects an under_review lead payout.
+ * approve-payout — approves or holds a lead payout.
  *
  * Actions:
- *   action: 'approve' — validates recipient code, fires Paystack transfer, sets sent/failed.
+ *   action: 'approve' — atomic row-claim, checks recipient code, fires Paystack transfer.
+ *                        On Paystack error: verifies via GET /transfer/verify/{reference}
+ *                        to avoid overwriting a transfer that is already pending or sent.
+ *                        If Paystack returns status=otp, sets failed with a clear message.
  *   action: 'reject'  — sets held with review_note, pushes participant.
  *
+ * Approvable statuses: under_review, approved, failed, held.
  * Caller must be the admin (JWT email check). Service role inside.
- * Idempotent: re-calling approve on an already approved/sent row is a no-op.
+ * Idempotent: re-calling approve on an already-sent row is a no-op.
  */
 
 const ADMIN_EMAIL = 'oluwaferanmionabanjo@gmail.com';
@@ -68,10 +72,10 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ── REJECT ───────────────────────────────────────────────────────────────
+    // ── HOLD (reject) ────────────────────────────────────────────────────────
     if (action === 'reject') {
       if (payout.status === 'sent') {
-        return new Response(JSON.stringify({ error: 'Cannot reject an already-sent payout' }), {
+        return new Response(JSON.stringify({ error: 'Cannot hold an already-sent payout' }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
@@ -81,7 +85,6 @@ Deno.serve(async (req: Request) => {
         review_note: review_note || 'Held by admin',
       }).eq('id', payout_id);
 
-      // Push participant
       const note = review_note || 'Please contact support for details.';
       await sendParticipantPush(
         admin, payout.participant_id,
@@ -97,20 +100,57 @@ Deno.serve(async (req: Request) => {
 
     // ── APPROVE ──────────────────────────────────────────────────────────────
     if (action === 'approve') {
-      // Idempotency
+      // Already sent — idempotent
       if (payout.status === 'sent') {
         return new Response(JSON.stringify({ ok: true, status: 'already_sent' }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      if (payout.status !== 'under_review' && payout.status !== 'approved' && payout.status !== 'failed') {
+      // Approvable statuses: under_review, approved, failed, held
+      const approvable = ['under_review', 'approved', 'failed', 'held', 'pending'];
+      if (!approvable.includes(payout.status)) {
         return new Response(JSON.stringify({ error: `Cannot approve payout with status: ${payout.status}` }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // Check participant has bank/recipient code
+      // ── Atomic row-claim: UPDATE only where status is still claimable ────────
+      // This prevents a double-click from firing two transfers concurrently.
+      const { data: claimed, error: claimErr } = await admin
+        .from('lead_payouts')
+        .update({
+          status: 'approved',
+          approved_at: new Date().toISOString(),
+          failure_reason: null,
+        })
+        .in('status', approvable)
+        .eq('id', payout_id)
+        .select('id')
+        .maybeSingle();
+
+      if (claimErr) {
+        console.error('Row-claim update error:', claimErr);
+        return new Response(JSON.stringify({ error: 'Failed to claim payout row' }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // If no row was updated, another request already claimed it
+      if (!claimed) {
+        // Re-fetch to return current state
+        const { data: current } = await admin.from('lead_payouts').select('status').eq('id', payout_id).single();
+        if (current?.status === 'sent') {
+          return new Response(JSON.stringify({ ok: true, status: 'already_sent' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ error: 'Payout was already claimed by another request' }), {
+          status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // ── Check recipient code ─────────────────────────────────────────────
       const { data: participant } = await admin
         .from('acquisition_participants')
         .select('id, name, paystack_recipient_code, user_id')
@@ -118,12 +158,15 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (!participant) {
+        await admin.from('lead_payouts').update({ status: 'failed', failure_reason: 'Participant not found' }).eq('id', payout_id);
         return new Response(JSON.stringify({ error: 'Participant not found' }), {
           status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
       if (!participant.paystack_recipient_code) {
+        // Revert to under_review so admin can retry after bank is set up
+        await admin.from('lead_payouts').update({ status: 'under_review' }).eq('id', payout_id);
         return new Response(JSON.stringify({
           error: 'No bank account on file. Ask the participant to complete bank setup first.',
         }), {
@@ -131,29 +174,14 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      // Mark approved
-      await admin.from('lead_payouts').update({
-        status: 'approved',
-        approved_at: new Date().toISOString(),
-      }).eq('id', payout_id);
-
-      // Push participant: payout approved
-      await sendParticipantPush(
-        admin, payout.participant_id,
-        '✅ Payout approved!',
-        `Your payout of ₦${Number(payout.amount).toLocaleString()} has been approved. Your payment is on its way.`,
-        { type: 'payout_approved', payout_id },
-      ).catch((e) => console.warn('Push failed:', e));
-
-      // ── Fire Paystack transfer ────────────────────────────────────────────
-      // Transfer reference = payout_id ensures idempotency (Paystack deduplicates by reference)
+      // ── Fire Paystack transfer ───────────────────────────────────────────
       const amountKobo = Math.round(Number(payout.amount) * 100);
       const transferPayload = {
         source: 'balance',
         reason: `NumVault Lead payout — block ${payout.block_number ?? '?'} half ${payout.cycle_number}`,
         amount: amountKobo,
         recipient: participant.paystack_recipient_code,
-        reference: payout_id, // UUID is unique — safe as Paystack reference
+        reference: payout_id, // UUID — Paystack deduplicates by reference
       };
 
       console.log('Initiating Paystack transfer:', JSON.stringify(transferPayload));
@@ -170,6 +198,21 @@ Deno.serve(async (req: Request) => {
       const psData = await psRes.json();
       console.log('Paystack transfer response:', JSON.stringify(psData));
 
+      // ── OTP required by Paystack ─────────────────────────────────────────
+      // Paystack returns status=otp when transfers OTP is enabled on the account.
+      // We cannot complete the transfer — fail with an actionable message.
+      if (psData.data?.status === 'otp') {
+        const otpMsg = 'Transfer OTP is turned on in Paystack. Disable it in Paystack Settings → Transfers → OTP, then retry.';
+        await admin.from('lead_payouts').update({
+          status: 'failed',
+          failure_reason: otpMsg,
+        }).eq('id', payout_id);
+        return new Response(JSON.stringify({ ok: false, status: 'failed', reason: otpMsg }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // ── Paystack accepted ────────────────────────────────────────────────
       if (psRes.ok && psData.status) {
         const transferCode = psData.data?.transfer_code ?? null;
         await admin.from('lead_payouts').update({
@@ -179,28 +222,86 @@ Deno.serve(async (req: Request) => {
           failure_reason: null,
         }).eq('id', payout_id);
 
-        // Final push to participant
+        // One push to participant after Paystack accepts
         await sendParticipantPush(
           admin, payout.participant_id,
           '💸 Payment sent!',
-          `₦${Number(payout.amount).toLocaleString()} is on its way to your bank account.`,
+          `Your payout of ₦${Number(payout.amount).toLocaleString()} has been approved and is on its way to your bank account.`,
           { type: 'payout_sent', payout_id, transfer_code: transferCode },
         ).catch((e) => console.warn('Push failed:', e));
 
         return new Response(JSON.stringify({ ok: true, status: 'sent', transfer_code: transferCode }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
-      } else {
-        const reason = psData.message || psData.data?.message || 'Paystack transfer failed';
-        await admin.from('lead_payouts').update({
-          status: 'failed',
-          failure_reason: `Paystack: ${reason}`,
-        }).eq('id', payout_id);
-
-        return new Response(JSON.stringify({ ok: false, status: 'failed', reason }), {
-          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
       }
+
+      // ── Paystack returned an error ────────────────────────────────────────
+      // Before marking failed, check via GET /transfer/verify/{reference}.
+      // A transfer with this reference may already exist (e.g., previous attempt
+      // timed out before we received the response).
+      const verifyRes = await fetch(`https://api.paystack.co/transfer/verify/${payout_id}`, {
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+      });
+      const verifyData = await verifyRes.json();
+      console.log('Paystack verify response:', JSON.stringify(verifyData));
+
+      if (verifyRes.ok && verifyData.status && verifyData.data) {
+        const existingStatus: string = verifyData.data.status ?? '';
+        const existingCode: string | null = verifyData.data.transfer_code ?? null;
+
+        if (existingStatus === 'success') {
+          // Transfer already completed — mark sent, never overwrite
+          await admin.from('lead_payouts').update({
+            status: 'sent',
+            paystack_transfer_code: existingCode,
+            sent_at: new Date().toISOString(),
+            failure_reason: null,
+          }).eq('id', payout_id);
+
+          await sendParticipantPush(
+            admin, payout.participant_id,
+            '💸 Payment sent!',
+            `Your payout of ₦${Number(payout.amount).toLocaleString()} has been approved and is on its way to your bank account.`,
+            { type: 'payout_sent', payout_id, transfer_code: existingCode },
+          ).catch(() => {});
+
+          return new Response(JSON.stringify({ ok: true, status: 'sent', transfer_code: existingCode }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        if (existingStatus === 'pending' || existingStatus === 'processing') {
+          // Transfer is in-flight — mark approved and let webhook or retry handle it
+          await admin.from('lead_payouts').update({
+            status: 'approved',
+            paystack_transfer_code: existingCode,
+            failure_reason: null,
+          }).eq('id', payout_id);
+
+          return new Response(JSON.stringify({ ok: true, status: 'approved', transfer_code: existingCode, note: 'Transfer is processing on Paystack' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        if (existingStatus === 'otp') {
+          const otpMsg = 'Transfer OTP is turned on in Paystack. Disable it in Paystack Settings → Transfers → OTP, then retry.';
+          await admin.from('lead_payouts').update({ status: 'failed', failure_reason: otpMsg }).eq('id', payout_id);
+          return new Response(JSON.stringify({ ok: false, status: 'failed', reason: otpMsg }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      // Verify also failed or transfer does not exist — mark failed
+      const reason = psData.message || psData.data?.message || 'Paystack transfer failed';
+      await admin.from('lead_payouts').update({
+        status: 'failed',
+        failure_reason: `Paystack: ${reason}`,
+      }).eq('id', payout_id);
+
+      return new Response(JSON.stringify({ ok: false, status: 'failed', reason }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {

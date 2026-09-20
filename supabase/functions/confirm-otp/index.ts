@@ -2,14 +2,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
 
 /**
- * confirm-otp — client-side OTP polling endpoint (updated for new block model)
+ * confirm-otp — client-side OTP polling endpoint.
  *
  * 1. Verifies caller owns the order.
  * 2. Returns early if the order is not pending.
  * 3. Calls Socially.ng for the OTP.
  * 4. If no OTP yet → { status: 'pending' }.
  * 5. If OTP found → calls complete_order_with_otp (atomic DB function).
- * 6. Sends push notifications to participant and/or admin based on result.
+ * 6. Awaits all push notifications to participant and/or admin before returning.
  * 7. Returns the OTP to the caller only when DB function confirms completion.
  */
 
@@ -117,7 +117,7 @@ Deno.serve(async (req: Request) => {
       new_status?: string;
     };
 
-    // A2: Only return otp when DB function confirms completion.
+    // Only return otp when DB function confirms completion.
     if (result?.result !== 'completed') {
       const { data: freshOrder } = await supabaseAdmin
         .from('orders')
@@ -130,7 +130,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── Push notifications ────────────────────────────────────────────────────
+    // ── Push notifications — all awaited before returning ─────────────────────
     const notifyPromises: Promise<void>[] = [];
 
     if (result.counted && result.participant_id && result.new_count !== undefined) {
@@ -148,11 +148,11 @@ Deno.serve(async (req: Request) => {
       );
 
       // At 76 (qualification complete → active_lead): admin push
-      if (newCount >= 76) {
+      if (newCount >= 76 || newStatus === 'active_lead') {
         notifyPromises.push(
           notifyAdmin(
             supabaseAdmin, result.participant_id,
-            '🏆 New ambassador qualified',
+            '🏆 [participant] qualified as an ambassador',
             `[participant] reached 76 customers and is now an active lead. Block 1 starts now.`,
             { type: 'admin_qualified_76', participant_id: result.participant_id },
           ).catch((e) => console.warn('Admin push error:', e)),
@@ -161,35 +161,44 @@ Deno.serve(async (req: Request) => {
 
       // Payout created: notify participant and admin
       if (result.payout_created) {
+        // Determine which payout was just created (h2 takes priority at 76)
         const payoutId = result.payout_h2_id || result.payout_h1_id;
         const half = result.payout_h2_id ? 2 : 1;
 
-        // Look up amount from payout row
-        supabaseAdmin.from('lead_payouts')
-          .select('amount, block_number')
-          .eq('id', payoutId)
-          .maybeSingle()
-          .then(({ data: payout }) => {
-            if (!payout) return;
-            const amtStr = `₦${Number(payout.amount).toLocaleString()}`;
-            // Notify participant
-            sendParticipantPush(
-              supabaseAdmin, result.participant_id!,
-              '💰 Payout pending review',
-              `Your ${amtStr} payout for Block ${payout.block_number} Half ${half} is under review. We will notify you when it is approved.`,
-              { type: 'payout_under_review', payout_id: payoutId },
-            ).catch(() => {});
-            // Notify admin
-            notifyAdmin(
-              supabaseAdmin, result.participant_id!,
-              '📋 Payout ready for review',
-              `[participant] has a payout ready for review: ${amtStr} Block ${payout.block_number} Half ${half}.`,
-              { type: 'admin_payout_review', payout_id: payoutId },
-            ).catch(() => {});
-          });
+        if (payoutId) {
+          notifyPromises.push(
+            (async () => {
+              const { data: payout } = await supabaseAdmin
+                .from('lead_payouts')
+                .select('amount, block_number')
+                .eq('id', payoutId)
+                .maybeSingle();
+              if (!payout) return;
+              const amtStr = `₦${Number(payout.amount).toLocaleString()}`;
+              const blockNum = payout.block_number ?? '?';
+
+              // Participant: payout under review
+              await sendParticipantPush(
+                supabaseAdmin, result.participant_id!,
+                '💰 Payout pending review',
+                `Your ${amtStr} payout for Block ${blockNum} Half ${half} is under review. We will notify you when it is approved.`,
+                { type: 'payout_under_review', payout_id: payoutId },
+              ).catch(() => {});
+
+              // Admin: payout ready for review
+              await notifyAdmin(
+                supabaseAdmin, result.participant_id!,
+                '📋 [participant] has a payout ready for review',
+                `[participant] has a payout ready for review: ${amtStr} Block ${blockNum} Half ${half}.`,
+                { type: 'admin_payout_review', payout_id: payoutId },
+              ).catch(() => {});
+            })(),
+          );
+        }
       }
     }
 
+    // Await ALL notifications before responding
     await Promise.all(notifyPromises);
 
     return new Response(JSON.stringify({ status: 'completed', otp }), {
@@ -258,7 +267,7 @@ async function notifyAdmin(
     headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({
       to: pushToken,
-      title,
+      title: title.replace('[participant]', name),
       body: bodyTemplate.replace('[participant]', name),
       data,
       sound: 'default',
@@ -299,6 +308,7 @@ async function sendParticipantPush(
 }
 
 // ── Referral push to participant (count-based messaging) ─────────────────────
+// Distinguishes between qualification wording and paid-block wording.
 
 async function sendReferralPushNotification(
   supabase: ReturnType<typeof createClient>,
@@ -306,21 +316,55 @@ async function sendReferralPushNotification(
   newCount: number,
   newStatus: string | null,
 ): Promise<void> {
+  // Determine whether the participant is in a paid block or still qualifying.
+  // Re-fetch the current participant record for the most accurate status.
+  const { data: participant } = await supabase
+    .from('acquisition_participants')
+    .select('status, paid_periods_completed')
+    .eq('id', participantId)
+    .maybeSingle();
+
+  // Use newStatus if the DB function just changed it; otherwise use persisted status.
+  const effectiveStatus = newStatus ?? participant?.status ?? 'qualifying';
+  const blockNum = (participant?.paid_periods_completed ?? 0) + 1;
+
   let title: string;
   let body: string;
 
-  if (newCount >= 76 || newStatus === 'active_lead') {
-    title = '🏆 You did it! 76 customers!';
-    body = 'You have qualified as a NumVault Customer Acquisition Lead. Block 1 starts now — your 30-day paid period has begun.';
-  } else if (newCount === 38) {
-    title = '⚡ Halfway there!';
-    body = '38 customers confirmed! Keep going — 38 more to qualify as a NumVault Lead.';
-  } else if (newCount >= 70) {
-    title = `🔥 Almost there! ${newCount}/76`;
-    body = `Only ${76 - newCount} more validated customers to qualify.`;
+  if (effectiveStatus === 'active_lead' && (newCount >= 76 || newStatus === 'active_lead')) {
+    // This customer was the 76th that triggered qualification → transition to active_lead
+    title = '🏆 You qualified! Block 1 starts now.';
+    body = 'You referred 76 customers and are now a NumVault Customer Acquisition Lead. Your 30-day paid Block 1 has begun.';
+  } else if (effectiveStatus === 'active_lead') {
+    // Already an active lead — count increments inside a paid block
+    if (newCount >= 76) {
+      title = `🎉 Block ${blockNum} complete!`;
+      body = `You reached 76 customers in Block ${blockNum}. Both halves are now under review. Your next block starts immediately.`;
+    } else if (newCount === 38) {
+      title = `✅ Half of Block ${blockNum} complete!`;
+      body = `38 customers confirmed for Block ${blockNum}. Half 1 (₦50,000) is now under review. Keep going!`;
+    } else if (newCount >= 70) {
+      title = `🔥 Almost done — ${newCount}/76 in Block ${blockNum}`;
+      body = `Only ${76 - newCount} more customers to complete Block ${blockNum}.`;
+    } else {
+      title = '🎉 New referral confirmed!';
+      body = `Customer #${newCount} validated for Block ${blockNum}. ${76 - newCount} more to complete this block.`;
+    }
   } else {
-    title = '🎉 New referral confirmed!';
-    body = `Customer #${newCount} validated. ${76 - newCount} more to qualify.`;
+    // Qualifying stage
+    if (newCount >= 76) {
+      title = '🏆 You did it! 76 customers!';
+      body = 'You have qualified as a NumVault Customer Acquisition Lead. Block 1 starts now — your 30-day paid period has begun.';
+    } else if (newCount === 38) {
+      title = '⚡ Halfway there!';
+      body = '38 customers confirmed! Keep going — 38 more to qualify as a NumVault Lead.';
+    } else if (newCount >= 70) {
+      title = `🔥 Almost there! ${newCount}/76`;
+      body = `Only ${76 - newCount} more validated customers to qualify.`;
+    } else {
+      title = '🎉 New referral confirmed!';
+      body = `Customer #${newCount} validated. ${76 - newCount} more to qualify.`;
+    }
   }
 
   await sendParticipantPush(supabase, participantId, title, body, {
