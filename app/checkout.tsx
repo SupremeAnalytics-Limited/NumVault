@@ -82,6 +82,15 @@ export default function CheckoutScreen() {
 
   const isWhatsApp = (params.project_name || '').toLowerCase().includes('whatsapp');
 
+  // Format naira: show 2 decimal places only when there are kobo cents
+  const formatNaira = (amount: number): string => {
+    const kobo = Math.round(amount * 100) % 100;
+    if (kobo !== 0) {
+      return amount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return Math.round(amount).toLocaleString();
+  };
+
   const executePurchase = async (reference: string | null, fromWallet: boolean) => {
     setPurchaseError(null);
     setPurchaseStage('purchasing');
@@ -281,6 +290,18 @@ export default function CheckoutScreen() {
               <Text style={styles.priceRowLabel}>Service fee</Text>
               <Text style={styles.priceRowValue}>₦{price.toLocaleString()}</Text>
             </View>
+            {balanceReady && !canPayFromWallet ? (
+              <>
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceRowLabel}>Wallet balance</Text>
+                  <Text style={styles.priceRowValue}>₦{formatNaira(walletBalance)}</Text>
+                </View>
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceRowLabel}>Short by</Text>
+                  <Text style={[styles.priceRowValue, { color: Colors.warning }]}>₦{formatNaira(Math.max(0, price - walletBalance))}</Text>
+                </View>
+              </>
+            ) : null}
             <View style={[styles.priceRow, styles.totalRow]}>
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.totalValue}>₦{price.toLocaleString()}</Text>
