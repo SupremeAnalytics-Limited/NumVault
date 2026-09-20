@@ -18,21 +18,29 @@ const { width, height } = Dimensions.get('window');
 const SCREENS = [
   {
     image: require('@/assets/images/nv_s1.png'),
-    headline: 'Privacy',
-    body: 'Keep your personal number private. NumVault gives you a dedicated number for any platform, app, or service — so your real number stays yours.',
-    steps: null as null | { num: string; text: string }[],
+    tag: 'think',
+    headline: 'Your number is more exposed than you',
+    body: 'Every sign-up form, every stranger you meet online, every app you download — they all want your personal phone number, with the possibility of it becoming another thing tied to your identity that can get leaked or get sold. Privacy shouldn\'t be optional by default',
+    steps: null as null | string[],
   },
   {
     image: require('@/assets/images/nv_s2.png'),
-    headline: 'Possibilities',
-    body: 'One place for every verification need. Whether you need a number for work, side projects, or online platforms — NumVault covers 2,300+ apps and services worldwide.',
+    tag: null as null | string,
+    headline: 'No subscription, No rent. Pay as you go.',
+    body: 'Choose from 2,300+ apps & services and pay only when you need a number without being locked into a monthly subscription. Your purchased number belongs to you for that service.',
     steps: null,
   },
   {
     image: require('@/assets/images/nv_s3.png'),
-    headline: 'Capacity',
-    body: 'Have numbers for different purposes - personal, business, projects, accounts, and more. With 2,300+ apps & services available, you have the capacity to create separation wherever you need it.',
-    steps: null,
+    tag: null,
+    headline: "Here's exactly how it works",
+    body: 'Have numbers for different purposes — personal, business, projects, accounts, and more. With 2,300+ apps & services available, you have the capacity to create separation wherever you need it.',
+    steps: [
+      'Choose what you\'re signing up for',
+      'Pick a number',
+      'Pay securely with your card or transfer',
+      'Get your number instantly. OTP delivered automatically.',
+    ],
   },
 ];
 
@@ -119,8 +127,24 @@ export default function OnboardingScreen() {
         {/* Screen counter */}
         <Text style={styles.screenCounter}>{currentIndex + 1} / {SCREENS.length}</Text>
 
+        {screen.tag ? (
+          <Text style={styles.tag}>{screen.tag}</Text>
+        ) : null}
         <Text style={styles.headline}>{screen.headline}</Text>
         <Text style={styles.body}>{screen.body}</Text>
+
+        {screen.steps ? (
+          <View style={styles.stepsContainer}>
+            {screen.steps.map((step, i) => (
+              <View key={i} style={styles.stepRow}>
+                <View style={styles.stepNum}>
+                  <Text style={styles.stepNumText}>{i + 1}</Text>
+                </View>
+                <Text style={styles.stepText}>{step}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {/* Dots */}
         <View style={styles.dots}>
@@ -246,5 +270,44 @@ const styles = StyleSheet.create({
     color: Colors.black,
     fontSize: FontSize.md,
     fontWeight: FontWeight.bold,
+  },
+  tag: {
+    color: Colors.primary,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  stepsContainer: {
+    gap: 10,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  stepNum: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  stepNumText: {
+    color: Colors.black,
+    fontSize: 11,
+    fontWeight: FontWeight.bold,
+  },
+  stepText: {
+    flex: 1,
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    lineHeight: 20,
   },
 });
