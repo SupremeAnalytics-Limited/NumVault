@@ -11,7 +11,7 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
  */
 const LOW_THRESHOLD = 40_000;           // ₦40,000 — trigger a top-up below this
 const TOPUP_AMOUNT = 200_000;           // ₦200,000 — fixed transfer amount
-const MIN_MINUTES_BETWEEN_TOPUPS = 5;  // Skip if a top-up was inserted within this window
+const MIN_MINUTES_BETWEEN_TOPUPS = 30;  // Skip if a top-up was inserted within this window
 const CRITICAL_BALANCE = 15_000;        // ₦15,000 — always alert admin at or below this
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -51,6 +51,16 @@ Deno.serve(async (req: Request) => {
         });
       }
     }
+
+    // ── 0. Expire stale pending auto-topup rows (older than 15 min) ─────────────
+    const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    await admin
+      .from('socially_transfers')
+      .update({ status: 'failed', error_message: 'Timed out while pending' })
+      .eq('trigger_reason', 'low_balance_auto')
+      .eq('status', 'pending')
+      .lt('created_at', fifteenMinAgo);
+    // ─────────────────────────────────────────────────────────────────────────────
 
     const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY') ?? '';
     const sociallyToken = Deno.env.get('SOCIALLY_API_TOKEN') ?? '';
@@ -111,14 +121,30 @@ Deno.serve(async (req: Request) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Always alert if at or below CRITICAL_BALANCE
+    // Always alert if at or below CRITICAL_BALANCE — rate-limited to once per 30 min
     if (sociallyBalance <= CRITICAL_BALANCE) {
-      await pushAdmin(
-        admin,
-        '🚨 Socially.ng balance critically low',
-        `Socially.ng balance is ₦${sociallyBalance.toLocaleString()}. Immediate action required.`,
-        { type: 'socially_critical_balance', balance: sociallyBalance },
-      ).catch(() => {});
+      const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const { data: recentCritical } = await admin
+        .from('socially_transfers')
+        .select('id')
+        .eq('trigger_reason', 'alert_critical_balance')
+        .gte('created_at', thirtyMinAgo)
+        .limit(1);
+      if (!recentCritical || recentCritical.length === 0) {
+        await admin.from('socially_transfers').insert({
+          order_reference: `alert_critical_${Date.now()}`,
+          amount_transferred: 0,
+          status: 'failed',
+          trigger_reason: 'alert_critical_balance',
+          error_message: `Critical balance alert: ₦${sociallyBalance}`,
+        }).catch(() => {});
+        await pushAdmin(
+          admin,
+          '🚨 Socially.ng balance critically low',
+          `Socially.ng balance is ₦${sociallyBalance.toLocaleString()}. Immediate action required.`,
+          { type: 'socially_critical_balance', balance: sociallyBalance },
+        ).catch(() => {});
+      }
     }
 
     // ── 2. Nothing to do if balance is healthy ────────────────────────────────
@@ -193,12 +219,28 @@ Deno.serve(async (req: Request) => {
     if (paystackFree < TOPUP_AMOUNT) {
       const msg = `Socially.ng balance is ₦${sociallyBalance.toLocaleString()} and Paystack has less than ₦${TOPUP_AMOUNT.toLocaleString()} free to top it up. Paystack available: ₦${paystackAvailable.toLocaleString()}, reserved for payouts: ₦${payoutReserve.toLocaleString()}, free: ₦${paystackFree.toLocaleString()}.`;
       console.warn(msg);
-      await pushAdmin(
-        admin,
-        '⚠️ Cannot top up Socially.ng — insufficient Paystack balance',
-        msg,
-        { type: 'socially_topup_insufficient_paystack', socially_balance: sociallyBalance, paystack_free: paystackFree },
-      ).catch(() => {});
+      const thirtyMinAgoC = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const { data: recentCannotTopup } = await admin
+        .from('socially_transfers')
+        .select('id')
+        .eq('trigger_reason', 'alert_cannot_topup')
+        .gte('created_at', thirtyMinAgoC)
+        .limit(1);
+      if (!recentCannotTopup || recentCannotTopup.length === 0) {
+        await admin.from('socially_transfers').insert({
+          order_reference: `alert_cannot_topup_${Date.now()}`,
+          amount_transferred: 0,
+          status: 'failed',
+          trigger_reason: 'alert_cannot_topup',
+          error_message: msg,
+        }).catch(() => {});
+        await pushAdmin(
+          admin,
+          '⚠️ Cannot top up Socially.ng — insufficient Paystack balance',
+          msg,
+          { type: 'socially_topup_insufficient_paystack', socially_balance: sociallyBalance, paystack_free: paystackFree },
+        ).catch(() => {});
+      }
       return new Response(JSON.stringify({
         action: 'skipped',
         reason: 'insufficient_paystack_balance',
@@ -268,22 +310,47 @@ Deno.serve(async (req: Request) => {
     const amountKobo = Math.round(TOPUP_AMOUNT * 100);
     console.log(`Firing Paystack transfer: ₦${TOPUP_AMOUNT} → ${SOCIALLY_ACCOUNT_NUMBER} (ref: ${ref})`);
 
-    const psTransferRes = await fetch(`${PAYSTACK_BASE}/transfer`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${paystackSecret}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        source: 'balance',
-        amount: amountKobo,
-        recipient: recipientCode,
-        reason: 'NumVault auto top-up — Socially.ng low balance',
-        reference: ref,
-      }),
-    });
+    let psTransferRes: Response;
+    let psTransferData: any;
 
-    const psTransferData = await psTransferRes.json();
+    try {
+      psTransferRes = await fetch(`${PAYSTACK_BASE}/transfer`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${paystackSecret}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          source: 'balance',
+          amount: amountKobo,
+          recipient: recipientCode,
+          reason: 'NumVault auto top-up — Socially.ng low balance',
+          reference: ref,
+        }),
+      });
+      psTransferData = await psTransferRes.json();
+    } catch (fetchErr) {
+      const fetchErrMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      console.error('Paystack transfer fetch threw:', fetchErrMsg);
+      await admin.from('socially_transfers').update({
+        status: 'failed',
+        error_message: `Transfer request failed: ${fetchErrMsg}`,
+        recipient_code: recipientCode,
+      }).eq('order_reference', ref);
+      await pushAdmin(
+        admin,
+        '🚨 Socially.ng auto top-up FAILED',
+        `Paystack transfer request threw an error: ${fetchErrMsg}. Socially balance was ₦${sociallyBalance.toLocaleString()}.`,
+        { type: 'socially_topup_fetch_threw', error: fetchErrMsg, socially_balance: sociallyBalance },
+      ).catch(() => {});
+      return new Response(JSON.stringify({
+        action: 'error',
+        reason: 'transfer_fetch_threw',
+        error: fetchErrMsg,
+        socially_balance: sociallyBalance,
+      }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     console.log('Paystack transfer response:', JSON.stringify(psTransferData));
 
     // OTP-gate
@@ -303,7 +370,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    if (psTransferRes.ok && psTransferData.status) {
+    if (psTransferRes!.ok && psTransferData.status) {
       const transferCode = psTransferData.data?.transfer_code ?? null;
       await admin.from('socially_transfers').update({
         status: 'success',
