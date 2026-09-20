@@ -490,7 +490,7 @@ export default function AcquisitionProgramScreen() {
               activeOpacity={0.8}
             >
               <Text style={[styles.tabBtnText, dashTab === 'proving' && styles.tabBtnTextActive]}>
-                Proving yourself
+                Earn your invite
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -510,7 +510,7 @@ export default function AcquisitionProgramScreen() {
           <View style={{ flex: 1 }}>
             {/* Lock overlay for "On the team" if not qualified */}
             {dashTab === 'onteam' && !isQualified ? (
-              <View style={styles.lockOverlay}>
+              <View style={styles.lockOverlay} pointerEvents="box-none">
                 <View style={styles.lockIconWrap}>
                   <MaterialIcons name="lock" size={26} color="#4ade80" />
                 </View>
@@ -782,13 +782,13 @@ export default function AcquisitionProgramScreen() {
                       <Text style={styles.refLabel}>Your referral code</Text>
                       <Text style={styles.refCode}>{participant.referral_code}</Text>
                     </View>
-                    <TouchableOpacity style={styles.copyBtn} onPress={copyCode} activeOpacity={0.7}>
-                      <MaterialIcons name={copiedCode ? 'check' : 'content-copy'} size={14} color="#4ade80" />
-                      <Text style={styles.copyBtnText}>{copiedCode ? 'Copied!' : 'Copy'}</Text>
-                    </TouchableOpacity>
                   </View>
+                  <TouchableOpacity style={styles.copyBtnLarge} onPress={copyCode} activeOpacity={0.85}>
+                    <MaterialIcons name={copiedCode ? 'check' : 'content-copy'} size={16} color="#061006" />
+                    <Text style={styles.copyBtnLargeText}>{copiedCode ? 'Copied!' : 'Copy Code'}</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity style={styles.shareBtn} onPress={shareCode} activeOpacity={0.85}>
-                    <MaterialIcons name="share" size={15} color="#061006" />
+                    <MaterialIcons name="share" size={15} color="#4ade80" />
                     <Text style={styles.shareBtnText}>Share referral code</Text>
                   </TouchableOpacity>
                 </View>
@@ -1110,7 +1110,8 @@ const styles = StyleSheet.create({
   // LOCK OVERLAY
   lockOverlay: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 32, backgroundColor: BG,
+    paddingHorizontal: 32,
+    backgroundColor: 'rgba(5,10,5,0.82)',
   },
   lockIconWrap: {
     width: 60, height: 60, borderRadius: 30,
@@ -1234,18 +1235,17 @@ const styles = StyleSheet.create({
   },
   refLabel: { fontSize: 11, color: MUTED, marginBottom: 3 },
   refCode: { fontSize: 18, fontWeight: '700', color: GREEN, letterSpacing: 2 },
-  copyBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'transparent', borderWidth: 1, borderColor: '#2a5a2a',
-    borderRadius: 100, paddingHorizontal: 12, paddingVertical: 7,
+  copyBtnLarge: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, backgroundColor: GREEN, borderRadius: 100, paddingVertical: 14,
   },
-  copyBtnText: { color: GREEN, fontSize: 12, fontWeight: '500' },
+  copyBtnLargeText: { color: '#061006', fontSize: 14, fontWeight: '700' },
   shareBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, backgroundColor: '#1a6a2a', borderRadius: 100,
-    paddingVertical: 14,
+    gap: 8, backgroundColor: 'transparent', borderWidth: 1, borderColor: '#2a5a2a',
+    borderRadius: 100, paddingVertical: 12,
   },
-  shareBtnText: { color: GREEN, fontSize: 14, fontWeight: '600' },
+  shareBtnText: { color: GREEN, fontSize: 13, fontWeight: '600' },
 
   // RE-ENROLL
   reEnrollBtn: {
