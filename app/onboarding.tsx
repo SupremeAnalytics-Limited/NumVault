@@ -8,6 +8,7 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/template';
 import { trackOnboardingCompleted } from '@/services/sentryService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
@@ -51,8 +52,9 @@ export default function OnboardingScreen() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const finish = () => {
+  const finish = async () => {
     trackOnboardingCompleted();
+    await AsyncStorage.setItem('nv_onboarding_done', 'true');
     router.replace(user ? '/(tabs)' : '/login');
   };
 
