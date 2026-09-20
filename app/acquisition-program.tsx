@@ -49,7 +49,7 @@ const LANDING_STEPS = [
     label: 'Customer Acquisition Lead commitment',
     icon: 'emoji-events' as const,
     title: 'Earn your Job Position with our company as a Customer Acquisition Lead',
-    body: 'Refer 76 paying customers in 30 days and we officially bring you on as a Customer Acquisition Lead — a paid staff role with your own dashboard and up to ₦100,000 a month. This is how you start.',
+    body: 'You are considered a Brand Ambassador for NumVault. Share your referral code with people — each person just needs to sign up and make one purchase for our system to confirm them as your customer. Your first 76 confirmed customers show us that you are reliable and ready to represent our company. Once we see that, we officially bring you on as a Customer Acquisition Lead and set up your Staff Dashboard. We will ask for your Nigerian bank account number — no card details, nothing else — and we use Paystack, our payments processor, to transfer your earnings directly to your account. From that point, every 76 paying customers you refer in a month earns you ₦100,000 paid straight to your bank. We do this for six months. Expect a bank transfer from Paystack each time you hit your target. We would be excited to have you on board with our company. This is how you start.',
   },
 ];
 
@@ -387,7 +387,7 @@ export default function AcquisitionProgramScreen() {
               <Text style={styles.ctaBtnText}>
                 {landingStep < LANDING_STEPS.length - 1
                   ? 'Next'
-                  : participant ? 'View My Progress' : 'Enroll in the Program'}
+                  : participant ? 'View My Progress' : 'Become an Ambassador'}
               </Text>
             </TouchableOpacity>
             {participant ? (
