@@ -13,7 +13,7 @@ import { WalletContext } from '@/contexts/WalletContext';
 import { OrderContext } from '@/contexts/OrderContext';
 import { fetchOrder, Order } from '@/services/orderService';
 import { requestNotificationPermissions, sendOTPReceivedNotification, sendRefundNotification } from '@/services/notificationService';
-import { getOTP } from '@/services/sociallyService';
+
 import { OTP_POLL_INTERVAL, OTP_TIMEOUT } from '@/constants/config';
 import {
   trackOtpReceived, trackOtpTimeout, trackRefundInitiated, trackRefundCompleted,
@@ -190,19 +190,26 @@ export default function NumberDisplayScreen() {
           }
           return;
         }
-        if (data.order_reference) {
+    if (data.order_reference) {
           try {
-            const { otp } = await getOTP(data.order_reference);
-            if (otp) {
-              await supabase
-                .from('orders')
-                .update({ otp, status: 'completed' })
-                .eq('id', order_id);
-              setOrder((prev) => prev ? { ...prev, otp, status: 'completed' } : prev);
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
+            const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+            const res = await fetch(`${supabaseUrl}/functions/v1/confirm-otp`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+              },
+              body: JSON.stringify({ order_id }),
+            });
+            const result = await res.json();
+            if (result.otp) {
+              setOrder((prev) => prev ? { ...prev, otp: result.otp, status: 'completed' } : prev);
               clearInterval(pollRef.current!);
               clearInterval(timerRef.current!);
               await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              await sendOTPReceivedNotification(data.project_name || 'Platform', otp);
+              await sendOTPReceivedNotification(data.project_name || 'Platform', result.otp);
             }
           } catch {
             // Silently continue
@@ -256,14 +263,24 @@ export default function NumberDisplayScreen() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setRequestingOTP(true);
     try {
-      const { otp } = await getOTP(order.order_reference);
-      if (otp) {
-        await supabase.from('orders').update({ otp, status: 'completed' }).eq('id', order_id);
-        setOrder((prev) => prev ? { ...prev, otp, status: 'completed' } : prev);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      const res = await fetch(`${supabaseUrl}/functions/v1/confirm-otp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ order_id }),
+      });
+      const result = await res.json();
+      if (result.otp) {
+        setOrder((prev) => prev ? { ...prev, otp: result.otp, status: 'completed' } : prev);
         clearInterval(pollRef.current!);
         clearInterval(timerRef.current!);
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        await sendOTPReceivedNotification(order.project_name || 'Platform', otp);
+        await sendOTPReceivedNotification(order.project_name || 'Platform', result.otp);
       } else {
         setOtpRequested(true);
         startPolling();

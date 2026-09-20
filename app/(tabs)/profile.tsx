@@ -14,15 +14,10 @@ import { useWallet } from '@/hooks/useWallet';
 import { Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
-import { FunctionsHttpError } from '@supabase/supabase-js';
 import { trackLogout, trackAccountDeleted, trackSupportInteraction } from '@/services/sentryService';
 
 const ADMIN_EMAIL = 'oluwaferanmionabanjo@gmail.com';
 const supabase = getSupabaseClient();
-
-// ── Admin: pending backlog transfer ─────────────────────────────────────────
-const BACKLOG_AMOUNT = 1422.14;
-const BACKLOG_ORDER_REF = 'nv_6ab1baa4_1787954081117';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -38,23 +33,7 @@ export default function ProfileScreen() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
 
-  // Admin transfer state
-  const [transferring, setTransferring] = useState(false);
-  const [transferResult, setTransferResult] = useState<{
-    success: boolean;
-    ref: string;
-    message: string;
-  } | null>(null);
 
-  // Admin subaccount setup state
-  const [settingUpSubaccount, setSettingUpSubaccount] = useState(false);
-  const [subaccountResult, setSubaccountResult] = useState<{
-    success: boolean;
-    subaccount_code: string;
-    already_existed: boolean;
-    note: string;
-    message: string;
-  } | null>(null);
 
   const isAdmin = user?.email === ADMIN_EMAIL;
 
@@ -89,112 +68,7 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const handleSetupSubaccount = async () => {
-    setSettingUpSubaccount(true);
-    setSubaccountResult(null);
-    try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const { data, error } = await supabase.functions.invoke('setup-subaccount', { body: {} });
 
-      if (error) {
-        let errorMessage = error.message;
-        if (error instanceof FunctionsHttpError) {
-          try {
-            const textContent = await error.context?.text();
-            errorMessage = textContent || error.message;
-          } catch { /* keep original */ }
-        }
-        setSubaccountResult({ success: false, subaccount_code: '', already_existed: false, note: '', message: errorMessage });
-        showAlert('Setup Failed', errorMessage);
-      } else if (data?.success) {
-        setSubaccountResult({
-          success: true,
-          subaccount_code: data.subaccount_code,
-          already_existed: !!data.already_existed,
-          note: data.note || '',
-          message: '',
-        });
-        const title = data.fixed
-          ? 'Split % Corrected'
-          : data.already_existed ? 'Subaccount Found' : 'Subaccount Created';
-        showAlert(
-          title,
-          `Code: ${data.subaccount_code}\n\n${data.note}`,
-        );
-      } else {
-        const msg = data?.error || 'Unknown error';
-        setSubaccountResult({ success: false, subaccount_code: '', already_existed: false, note: '', message: msg });
-        showAlert('Setup Failed', msg);
-      }
-    } catch (err: any) {
-      const msg = err?.message || 'Unexpected error';
-      setSubaccountResult({ success: false, subaccount_code: '', already_existed: false, note: '', message: msg });
-      showAlert('Error', msg);
-    } finally {
-      setSettingUpSubaccount(false);
-    }
-  };
-
-  const handleAdminTransfer = async () => {
-    showAlert(
-      'Send Backlog Transfer',
-      `Send ₦${BACKLOG_AMOUNT.toLocaleString()} to Socially.ng (Palmpay) for order ${BACKLOG_ORDER_REF}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send Now',
-          style: 'default',
-          onPress: async () => {
-            setTransferring(true);
-            setTransferResult(null);
-            try {
-              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-              const { data, error } = await supabase.functions.invoke('manual-transfer-test', {
-                body: {
-                  amount_naira: BACKLOG_AMOUNT,
-                  order_reference: BACKLOG_ORDER_REF,
-                  trigger_reason: 'manual_backlog_recovery',
-                },
-              });
-
-              if (error) {
-                let errorMessage = error.message;
-                if (error instanceof FunctionsHttpError) {
-                  try {
-                    const textContent = await error.context?.text();
-                    errorMessage = textContent || error.message;
-                  } catch {
-                    // keep original
-                  }
-                }
-                setTransferResult({ success: false, ref: '', message: errorMessage });
-                showAlert('Transfer Failed', errorMessage);
-              } else if (data?.success) {
-                const ref = data.paystack_transfer_reference || 'n/a';
-                setTransferResult({
-                  success: true,
-                  ref,
-                  message: `₦${BACKLOG_AMOUNT.toLocaleString()} sent. Ref: ${ref}`,
-                });
-                showAlert('Transfer Successful', `₦${BACKLOG_AMOUNT.toLocaleString()} sent to Socially.ng.\n\nPaystack ref: ${ref}`);
-              } else {
-                const msg = data?.error || 'Unknown error from transfer function';
-                setTransferResult({ success: false, ref: '', message: msg });
-                showAlert('Transfer Failed', msg);
-              }
-            } catch (err: any) {
-              const msg = err?.message || 'Unexpected error';
-              setTransferResult({ success: false, ref: '', message: msg });
-              showAlert('Transfer Error', msg);
-            } finally {
-              setTransferring(false);
-            }
-          },
-        },
-      ],
-    );
-  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -301,57 +175,8 @@ export default function ProfileScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Admin</Text>
             <View style={styles.adminCard}>
-              <View style={styles.adminHeader}>
-                <MaterialIcons name="admin-panel-settings" size={18} color={Colors.warning} />
-                <Text style={styles.adminTitle}>Backlog Transfer</Text>
-              </View>
-              <Text style={styles.adminDesc}>
-                Send ₦{BACKLOG_AMOUNT.toLocaleString(undefined, { minimumFractionDigits: 2 })} to Socially.ng
-                (Palmpay 6635796668) for failed order{'\n'}
-                <Text style={styles.adminRef}>{BACKLOG_ORDER_REF}</Text>
-              </Text>
-
-              {transferResult ? (
-                <View style={[
-                  styles.resultBadge,
-                  { borderColor: transferResult.success ? Colors.success : Colors.error },
-                ]}>
-                  <MaterialIcons
-                    name={transferResult.success ? 'check-circle' : 'error'}
-                    size={16}
-                    color={transferResult.success ? Colors.success : Colors.error}
-                  />
-                  <Text style={[
-                    styles.resultText,
-                    { color: transferResult.success ? Colors.success : Colors.error },
-                  ]}>
-                    {transferResult.message}
-                  </Text>
-                </View>
-              ) : null}
-
               <TouchableOpacity
-                style={[styles.adminBtn, transferring && styles.adminBtnDisabled]}
-                onPress={handleAdminTransfer}
-                activeOpacity={0.8}
-                disabled={transferring || transferResult?.success === true}
-              >
-                {transferring ? (
-                  <ActivityIndicator size="small" color={Colors.black} />
-                ) : (
-                  <MaterialIcons name="send" size={16} color={Colors.black} />
-                )}
-                <Text style={styles.adminBtnText}>
-                  {transferring
-                    ? 'Sending...'
-                    : transferResult?.success
-                    ? 'Sent'
-                    : 'Send Transfer'}
-                </Text>
-              </TouchableOpacity>
-              {/* Admin Dashboard link */}
-              <TouchableOpacity
-                style={[styles.menuRow, { borderBottomWidth: 0 }]}
+                style={styles.menuRow}
                 onPress={async () => {
                   await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   router.push('/admin');
@@ -361,62 +186,6 @@ export default function ProfileScreen() {
                 <MaterialIcons name="dashboard" size={18} color={Colors.warning} />
                 <Text style={[styles.menuLabel, { color: Colors.warning, flex: 1 }]}>Acquisition Admin Dashboard</Text>
                 <MaterialIcons name="chevron-right" size={18} color={Colors.warning} />
-              </TouchableOpacity>
-            </View>
-
-            {/* ── Setup Paystack Subaccount ── */}
-            <View style={[styles.adminCard, { borderColor: Colors.primary, marginTop: Spacing.sm }]}>
-              <View style={styles.adminHeader}>
-                <MaterialIcons name="account-balance" size={18} color={Colors.primary} />
-                <Text style={[styles.adminTitle, { color: Colors.primary }]}>Paystack Split Setup</Text>
-              </View>
-              <Text style={styles.adminDesc}>
-                Create a Paystack subaccount for Socially.ng (Palmpay 6635796668).{`\n`}
-                Main account keeps <Text style={{ color: Colors.text, fontWeight: FontWeight.semibold }}>28.57%</Text>, Socially.ng receives <Text style={{ color: Colors.primary, fontWeight: FontWeight.semibold }}>71.43%</Text> per sale.{`\n`}
-                Idempotent — safe to run again if already set up.
-              </Text>
-
-              {subaccountResult ? (
-                <View style={[styles.resultBadge, { borderColor: subaccountResult.success ? Colors.primary : Colors.error }]}>
-                  <MaterialIcons
-                    name={subaccountResult.success ? 'check-circle' : 'error'}
-                    size={16}
-                    color={subaccountResult.success ? Colors.primary : Colors.error}
-                  />
-                  <View style={{ flex: 1, gap: 4 }}>
-                    {subaccountResult.success ? (
-                      <>
-                        <Text style={[styles.resultText, { color: Colors.primary }]}>
-                          {subaccountResult.already_existed ? 'Already exists' : 'Created'}: <Text style={{ fontFamily: 'monospace' }}>{subaccountResult.subaccount_code}</Text>
-                        </Text>
-                        <Text style={[styles.resultText, { color: Colors.textSecondary }]}>
-                          {subaccountResult.note}
-                        </Text>
-                        <Text style={[styles.resultText, { color: Colors.warning }]}>
-                          Next: add secret SOCIALLY_SUBACCOUNT_CODE = {subaccountResult.subaccount_code}
-                        </Text>
-                      </>
-                    ) : (
-                      <Text style={[styles.resultText, { color: Colors.error }]}>{subaccountResult.message}</Text>
-                    )}
-                  </View>
-                </View>
-              ) : null}
-
-              <TouchableOpacity
-                style={[styles.adminBtn, { backgroundColor: Colors.primary }, settingUpSubaccount && styles.adminBtnDisabled]}
-                onPress={handleSetupSubaccount}
-                activeOpacity={0.8}
-                disabled={settingUpSubaccount}
-              >
-                {settingUpSubaccount ? (
-                  <ActivityIndicator size="small" color={Colors.black} />
-                ) : (
-                  <MaterialIcons name="account-balance" size={16} color={Colors.black} />
-                )}
-                <Text style={styles.adminBtnText}>
-                  {settingUpSubaccount ? 'Setting up...' : 'Setup / Check Subaccount'}
-                </Text>
               </TouchableOpacity>
             </View>
           </View>

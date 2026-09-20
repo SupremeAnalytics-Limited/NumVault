@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, ActivityIndicator, RefreshControl, Modal,
@@ -93,6 +93,15 @@ export default function AdminDashboardScreen() {
   const [participantFilter, setParticipantFilter] = useState<string>('all');
 
   useEffect(() => { checkAndLoad(); }, []);
+
+  // Silent 30-second auto-refresh while screen is open
+  useEffect(() => {
+    if (!isAdmin) return;
+    const interval = setInterval(() => {
+      loadAll();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [isAdmin, loadAll]);
 
   const checkAndLoad = async () => {
     const { data: { user } } = await supabase.auth.getUser();
