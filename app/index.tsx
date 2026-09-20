@@ -6,6 +6,10 @@ import { useAuth } from '@/template';
 import { Colors } from '@/constants/theme';
 
 const ONBOARDING_KEY = 'nv_onboarding_done';
+// Bump this version whenever the onboarding content changes significantly.
+// Changing it invalidates any stored flag and forces users to see onboarding again.
+const ONBOARDING_VERSION = 'v5';
+const ONBOARDING_VERSIONED_KEY = `${ONBOARDING_KEY}_${ONBOARDING_VERSION}`;
 
 export default function RootScreen() {
   const { user, loading } = useAuth();
@@ -13,7 +17,7 @@ export default function RootScreen() {
   const [onboardingDone, setOnboardingDone] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(ONBOARDING_KEY).then((val) => {
+    AsyncStorage.getItem(ONBOARDING_VERSIONED_KEY).then((val) => {
       setOnboardingDone(val === 'true');
       setChecking(false);
     });
@@ -28,6 +32,7 @@ export default function RootScreen() {
   }
 
   // First-time user: show onboarding regardless of auth state
+  // First-time user or new onboarding version: show onboarding
   if (!onboardingDone) return <Redirect href="/onboarding" />;
 
   // Returning user: route by auth state

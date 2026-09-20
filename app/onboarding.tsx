@@ -1,4 +1,4 @@
-// cache-bust: build-v4
+// cache-bust: build-v5
 import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, Dimensions, TouchableOpacity,
@@ -54,7 +54,7 @@ export default function OnboardingScreen() {
 
   const finish = async () => {
     trackOnboardingCompleted();
-    await AsyncStorage.setItem('nv_onboarding_done', 'true');
+    await AsyncStorage.setItem('nv_onboarding_done_v5', 'true');
     router.replace(user ? '/(tabs)' : '/login');
   };
 
