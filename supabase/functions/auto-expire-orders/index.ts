@@ -22,6 +22,13 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
 
 const OTP_TIMEOUT_MINUTES = 5; // must match OTP_TIMEOUT in constants/config.ts (300_000 ms)
 
+// ── auto-expire-orders schedule note ──────────────────────────────────────────
+// This function is triggered by the OnSpace/Supabase cron scheduler.
+// It runs every 1 minute via a pg_cron job configured in the Supabase dashboard
+// (or via the Edge Function scheduler). Each invocation scans all pending orders
+// older than OTP_TIMEOUT_MINUTES (5 min) and expires + refunds them.
+// ─────────────────────────────────────────────────────────────────────────────
+
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req);
   if (corsRes) return corsRes;
@@ -31,6 +38,22 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
+
+    // ── Socially.ng balance check on every run ─────────────────────────────────
+    // Fire-and-forget with a 5 s timeout so it can never stall the expiry run.
+    (() => {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 5_000);
+      const supabaseUrl2 = Deno.env.get('SUPABASE_URL') ?? '';
+      const svcKey2 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      fetch(`${supabaseUrl2}/functions/v1/ensure-socially-balance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${svcKey2}` },
+        body: JSON.stringify({}),
+        signal: controller.signal,
+      }).then(() => clearTimeout(tid)).catch(() => clearTimeout(tid));
+    })();
+    // ─────────────────────────────────────────────────────────────────────────
 
     const cutoff = new Date(Date.now() - OTP_TIMEOUT_MINUTES * 60 * 1000).toISOString();
     console.log(`auto-expire-orders: scanning pending orders created before ${cutoff}`);

@@ -305,6 +305,24 @@ Deno.serve(async (req: Request) => {
         ? 'NV-901: Transaction could not be completed. Your payment has been refunded — please try again in a moment.'
         : rawSociallyError;
 
+      // ── Balance check on failure (before refund) ────────────────────────────
+      // A Socially failure may indicate low balance — check and top up now.
+      // One call only, 5 s timeout, never retried and never blocks the refund.
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 5_000);
+        const supabaseUrl3 = Deno.env.get('SUPABASE_URL') ?? '';
+        const svcKey3 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        await fetch(`${supabaseUrl3}/functions/v1/ensure-socially-balance`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${svcKey3}` },
+          body: JSON.stringify({}),
+          signal: controller.signal,
+        });
+        clearTimeout(tid);
+      } catch { /* non-blocking */ }
+      // ─────────────────────────────────────────────────────────────────────────
+
       // ── REFUND/ROLLBACK ──────────────────────────────────────────────────────
       // Safe to refund here: the lock insert succeeded above, meaning this is
       // guaranteed to be the ONLY caller that reaches this point for this reference.
@@ -354,6 +372,22 @@ Deno.serve(async (req: Request) => {
 
     const numberData = sociallyData.data;
     const phoneNumber = numberData?.mobile_number || numberData?.phone || numberData?.number || String(numberData);
+
+    // ── Trigger balance check AFTER successful Socially.ng purchase ──────────
+    // Fire-and-forget with 5 s timeout — must never slow the customer response.
+    (() => {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 5_000);
+      const supabaseUrl2 = Deno.env.get('SUPABASE_URL') ?? '';
+      const svcKey2 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      fetch(`${supabaseUrl2}/functions/v1/ensure-socially-balance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${svcKey2}` },
+        body: JSON.stringify({}),
+        signal: controller.signal,
+      }).then(() => clearTimeout(tid)).catch(() => clearTimeout(tid));
+    })();
+    // ─────────────────────────────────────────────────────────────────────────
 
     const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
