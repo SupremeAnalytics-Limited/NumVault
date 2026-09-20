@@ -28,12 +28,6 @@ type AcqLaunchState = 'first_launch' | 'downgraded' | 'active_staff';
 
 const LANDING_STEPS = [
   {
-    label: 'SupremeAnalytics intro',
-    icon: 'business' as const,
-    title: 'We build software that opens doors',
-    body: 'SupremeAnalytics is a Nigerian software company. We build products that give everyday people — students, freelancers, and working professionals — access to the same digital opportunities as anyone else in the world.',
-  },
-  {
     label: 'Side income',
     icon: 'schedule' as const,
     title: 'A side income that fits your life',
