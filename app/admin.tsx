@@ -108,6 +108,18 @@ export default function AdminDashboardScreen() {
   const [obligationTotal, setObligationTotal] = useState(0);
   const [totalTransferred, setTotalTransferred] = useState(0);
 
+  // Withdrawable card — fetched manually (not on 30s auto-refresh)
+  const [withdrawable, setWithdrawable] = useState<{
+    paystack_available: number;
+    payouts_owed: number;
+    accruing: number;
+    topup_reserve: number;
+    cushion: number;
+    safe_to_withdraw: number;
+  } | null>(null);
+  const [withdrawableLoading, setWithdrawableLoading] = useState(false);
+  const [withdrawableError, setWithdrawableError] = useState<string | null>(null);
+
   const [detailP, setDetailP] = useState<AdminParticipant | null>(null);
   const [detailRefs, setDetailRefs] = useState<ReferredCustomer[]>([]);
   const [detailPayouts, setDetailPayouts] = useState<LeadPayout[]>([]);
@@ -127,10 +139,36 @@ export default function AdminDashboardScreen() {
     return () => clearInterval(interval);
   }, [isAdmin, loadAll]);
 
+  const fetchWithdrawable = useCallback(async () => {
+    setWithdrawableLoading(true);
+    setWithdrawableError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      const res = await fetch(`${supabaseUrl}/functions/v1/admin-withdrawable`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setWithdrawableError(data.error || 'Unavailable');
+      } else {
+        setWithdrawable(data);
+      }
+    } catch (e: any) {
+      setWithdrawableError(e.message || 'Unavailable');
+    } finally {
+      setWithdrawableLoading(false);
+    }
+  }, []);
+
   const checkAndLoad = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user?.email !== ADMIN_EMAIL) { setIsAdmin(false); setLoading(false); return; }
     setIsAdmin(true);
+    fetchWithdrawable();
     // Close expired blocks for all active leads on admin load
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -418,7 +456,7 @@ export default function AdminDashboardScreen() {
           <Text style={styles.headerSub}>NumVault Acquisition Program</Text>
         </View>
         <TouchableOpacity style={styles.refreshBtn}
-          onPress={() => { setRefreshing(true); loadAll(); }} activeOpacity={0.7}>
+          onPress={() => { setRefreshing(true); loadAll(); fetchWithdrawable(); }} activeOpacity={0.7}>
           {refreshing ? <ActivityIndicator size="small" color={GREEN} /> : <MaterialIcons name="refresh" size={19} color={MUTED} />}
         </TouchableOpacity>
       </View>
@@ -470,6 +508,54 @@ export default function AdminDashboardScreen() {
             )}
 
             <View style={styles.sectionLabel}><Text style={styles.sectionLabelText}>FINANCIAL OVERVIEW</Text></View>
+
+            {/* Available withdrawal card */}
+            <View style={[finStyles.card, { borderColor: GREEN + '44', gap: 0 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <View style={[finStyles.iconWrap, { backgroundColor: GREEN + '18' }]}>
+                  <MaterialIcons name="savings" size={18} color={GREEN} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[finStyles.label, { marginBottom: 0 }]}>Available withdrawal</Text>
+                  <Text style={[finStyles.sub, { marginTop: 1 }]}>After all obligations and reserves</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={fetchWithdrawable}
+                  disabled={withdrawableLoading}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  activeOpacity={0.7}
+                >
+                  {withdrawableLoading
+                    ? <ActivityIndicator size="small" color={GREEN} />
+                    : <MaterialIcons name="refresh" size={16} color={MUTED} />}
+                </TouchableOpacity>
+              </View>
+              {withdrawableError ? (
+                <Text style={{ color: RED, fontSize: 13, fontWeight: '600', marginBottom: 8 }}>Unavailable</Text>
+              ) : withdrawable ? (
+                <Text style={{ color: GREEN, fontSize: 28, fontWeight: '700', marginBottom: 10 }}>
+                  ₦{withdrawable.safe_to_withdraw.toLocaleString()}
+                </Text>
+              ) : withdrawableLoading ? (
+                <Text style={{ color: MUTED, fontSize: 13, marginBottom: 10 }}>Loading...</Text>
+              ) : null}
+              {withdrawable ? (
+                <View style={{ gap: 6 }}>
+                  {[
+                    { label: 'Paystack balance', value: `₦${withdrawable.paystack_available.toLocaleString()}` },
+                    { label: 'Payouts owed', value: `–₦${withdrawable.payouts_owed.toLocaleString()}`, warn: withdrawable.payouts_owed > 0 },
+                    { label: 'Earning this month', value: `–₦${withdrawable.accruing.toLocaleString()}`, warn: withdrawable.accruing > 0 },
+                    { label: 'Top-up reserve', value: `–₦${withdrawable.topup_reserve.toLocaleString()}` },
+                    { label: 'Cushion', value: `–₦${withdrawable.cushion.toLocaleString()}` },
+                  ].map((row) => (
+                    <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 11, color: MUTED }}>{row.label}</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: row.warn ? GOLD : TEXT2 }}>{row.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
             <View style={styles.finRow}>
               <FinCard label="Lead Obligations" value={`₦${obligationTotal.toLocaleString()}`} icon="account-balance" accent={GREEN} sub="Total owed to leads" />
               <FinCard label="Unattributed" value={`₦${unattributedTotal.toLocaleString()}`} icon="trending-up" accent="#60a5fa" sub="No referral attached" />
