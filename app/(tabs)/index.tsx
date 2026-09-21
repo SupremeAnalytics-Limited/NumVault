@@ -527,7 +527,7 @@ export default function HomeScreen() {
 
             <View style={styles.sheetDetails}>
               {[
-                { label: 'You receive', value: 'Real temporary phone number' },
+                { label: 'Your number', value: '🔒 +1 (***) ***-****' },
                 { label: 'OTP delivery', value: 'Auto-captured within 10 min' },
                 { label: 'Refund policy', value: 'Auto-refund if no OTP in 5 mins', green: true },
               ].map((row) => (
@@ -559,7 +559,7 @@ export default function HomeScreen() {
                   <>
                     <MaterialIcons name="lock" size={16} color={Colors.black} />
                     <Text style={styles.payBtnText}>
-                      {sheetHasPrice ? `Pay ₦${sheetPrice.toLocaleString()}` : 'Price unavailable'}
+                      {sheetHasPrice ? 'Unlock Phone Number' : 'Price unavailable'}
                     </Text>
                   </>
                 )
