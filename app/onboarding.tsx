@@ -18,7 +18,7 @@ const { width, height } = Dimensions.get('window');
 const SCREENS = [
   {
     image: require('@/assets/images/nv_s1.png'),
-    tag: 'think',
+    tag: null as null | string,
     headline: 'Your number is more exposed than you',
     body: 'Every sign-up form, every stranger you meet online, every app you download — they all want your personal phone number, with the possibility of it becoming another thing tied to your identity that can get leaked or get sold. Privacy shouldn\'t be optional by default',
     steps: null as null | string[],

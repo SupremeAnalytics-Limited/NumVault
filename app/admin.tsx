@@ -109,6 +109,8 @@ export default function AdminDashboardScreen() {
   const [totalTransferred, setTotalTransferred] = useState(0);
 
   // Withdrawable card — fetched manually (not on 30s auto-refresh)
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
+
   const [withdrawable, setWithdrawable] = useState<{
     paystack_available: number;
     payouts_owed: number;
@@ -256,7 +258,16 @@ export default function AdminDashboardScreen() {
 
       const allLedger = ledger || [];
       setUnattributedTotal(allLedger.filter((l: any) => l.entry_type === 'unattributed_profit').reduce((s: number, l: any) => s + Number(l.amount), 0));
-      setObligationTotal(allLedger.filter((l: any) => l.entry_type === 'lead_obligation').reduce((s: number, l: any) => s + Number(l.amount), 0));
+
+      // Obligation = unsent payouts + accruing earnings for active leads
+      const payoutsOwed = (paysData)
+        .filter((p) => ['pending','under_review','approved','held','failed'].includes(p.status))
+        .reduce((s, p) => s + Number(p.amount), 0);
+      const activeLeadAccruing = (parts ?? []).filter((p) => p.status === 'active_lead').reduce((s, p) => {
+        const count = Number((p as any).qualification_customers_count ?? 0);
+        return s + Math.max(0, count * (100000 / 76) - (count >= 38 ? 50000 : 0));
+      }, 0);
+      setObligationTotal(Math.round(payoutsOwed + activeLeadAccruing));
     } catch (e) {
       console.error('Admin load error', e);
     } finally {
@@ -533,27 +544,41 @@ export default function AdminDashboardScreen() {
               {withdrawableError ? (
                 <Text style={{ color: RED, fontSize: 13, fontWeight: '600', marginBottom: 8 }}>Unavailable</Text>
               ) : withdrawable ? (
-                <Text style={{ color: GREEN, fontSize: 28, fontWeight: '700', marginBottom: 10 }}>
-                  ₦{withdrawable.safe_to_withdraw.toLocaleString()}
-                </Text>
+                <>
+                  <Text style={{ color: GREEN, fontSize: 28, fontWeight: '700', marginBottom: 4 }}>
+                    ₦{withdrawable.safe_to_withdraw.toLocaleString()}
+                  </Text>
+                  <Text style={{ color: MUTED, fontSize: 11, marginBottom: 10 }}>
+                    Paystack balance ₦{withdrawable.paystack_available.toLocaleString()}
+                  </Text>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginBottom: breakdownOpen ? 10 : 0 }}
+                    onPress={() => setBreakdownOpen((v) => !v)}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={{ fontSize: 11, color: MUTED, fontWeight: '600' }}>See breakdown</Text>
+                    <MaterialIcons name={breakdownOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} size={14} color={MUTED} />
+                  </TouchableOpacity>
+                  {breakdownOpen ? (
+                    <View style={{ gap: 6 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: MUTED2, letterSpacing: 1, marginBottom: 2 }}>HELD BACK FROM YOUR BALANCE</Text>
+                      {[
+                        { label: 'Payouts owed', value: `₦${withdrawable.payouts_owed.toLocaleString()}`, warn: withdrawable.payouts_owed > 0 },
+                        { label: 'Earning this month', value: `₦${withdrawable.accruing.toLocaleString()}`, warn: withdrawable.accruing > 0 },
+                        { label: 'Top-up reserve', value: `₦${withdrawable.topup_reserve.toLocaleString()}` },
+                        { label: 'Cushion', value: `₦${withdrawable.cushion.toLocaleString()}` },
+                      ].map((row) => (
+                        <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={{ fontSize: 11, color: MUTED }}>{row.label}</Text>
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: row.warn ? GOLD : TEXT2 }}>{row.value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </>
               ) : withdrawableLoading ? (
                 <Text style={{ color: MUTED, fontSize: 13, marginBottom: 10 }}>Loading...</Text>
-              ) : null}
-              {withdrawable ? (
-                <View style={{ gap: 6 }}>
-                  {[
-                    { label: 'Paystack balance', value: `₦${withdrawable.paystack_available.toLocaleString()}` },
-                    { label: 'Payouts owed', value: `–₦${withdrawable.payouts_owed.toLocaleString()}`, warn: withdrawable.payouts_owed > 0 },
-                    { label: 'Earning this month', value: `–₦${withdrawable.accruing.toLocaleString()}`, warn: withdrawable.accruing > 0 },
-                    { label: 'Top-up reserve', value: `–₦${withdrawable.topup_reserve.toLocaleString()}` },
-                    { label: 'Cushion', value: `–₦${withdrawable.cushion.toLocaleString()}` },
-                  ].map((row) => (
-                    <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                      <Text style={{ fontSize: 11, color: MUTED }}>{row.label}</Text>
-                      <Text style={{ fontSize: 11, fontWeight: '600', color: row.warn ? GOLD : TEXT2 }}>{row.value}</Text>
-                    </View>
-                  ))}
-                </View>
               ) : null}
             </View>
             <View style={styles.finRow}>

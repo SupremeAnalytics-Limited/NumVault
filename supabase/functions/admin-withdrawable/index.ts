@@ -86,7 +86,7 @@ Deno.serve(async (req: Request) => {
     const { data: owedRows, error: owedErr } = await admin
       .from('lead_payouts')
       .select('amount')
-      .in('status', ['pending', 'under_review', 'approved', 'held']);
+      .in('status', ['pending', 'under_review', 'approved', 'held', 'failed']);
 
     if (owedErr) {
       console.error('lead_payouts query error:', owedErr);
