@@ -18,10 +18,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "ng.numvault.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "NumVault uses the camera only if you choose to take a photo inside the app.",
-        "NSContactsUsageDescription": "NumVault accesses your contacts only if you choose to share a number with someone from your contacts.",
-        "NSCalendarsUsageDescription": "NumVault accesses your calendar only if you choose to add a reminder from the app."
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

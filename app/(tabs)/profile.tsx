@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useAuth, useAlert, getSupabaseClient } from '@/template';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 import { useWallet } from '@/hooks/useWallet';
 import { Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
