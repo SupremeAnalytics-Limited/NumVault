@@ -60,6 +60,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "owner": "supremeesimon",
+    "extra": {
+      "eas": {
+        "projectId": "9194c8f5-1135-43b2-8564-ea3c67f4ea68"
+      }
     }
   }
 }
