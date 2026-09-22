@@ -5,12 +5,20 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
  * ensure-socially-balance
  *
  * Checks the Socially.ng balance and tops it up via a Paystack transfer if
- * it falls below LOW_THRESHOLD.
+ * it falls below LOW_THRESHOLD. The amount follows demand (last hour's
+ * wholesale spend × DEMAND_MULTIPLIER, clamped to MIN/MAX) and never touches
+ * money owed or accruing to ambassador leads.
  *
  * ── Tuneable constants ────────────────────────────────────────────────────
  */
 const LOW_THRESHOLD = 40_000;           // ₦40,000 — trigger a top-up below this
-const TOPUP_AMOUNT = 200_000;           // ₦200,000 — fixed transfer amount
+const MIN_TOPUP = 40_000;               // ₦40,000 — smallest transfer worth sending
+const MAX_TOPUP = 200_000;              // ₦200,000 — largest single transfer
+const DEMAND_MULTIPLIER = 1.5;          // Send 1.5× last hour's wholesale spend
+const DEMAND_WINDOW_MINUTES = 60;
+const FLAT_ACQUISITION_FEE = 1_500;     // Retail = wholesale + ₦1,500
+const LEAD_MONTHLY_PAY = 100_000;       // ₦100,000 per 76 customers
+const LEAD_MONTHLY_TARGET = 76;
 const MIN_MINUTES_BETWEEN_TOPUPS = 30;  // Skip if a top-up was inserted within this window
 const CRITICAL_BALANCE = 15_000;        // ₦15,000 — always alert admin at or below this
 // ─────────────────────────────────────────────────────────────────────────────
@@ -137,7 +145,7 @@ Deno.serve(async (req: Request) => {
           status: 'failed',
           trigger_reason: 'alert_critical_balance',
           error_message: `Critical balance alert: ₦${sociallyBalance}`,
-        }).catch(() => {});
+        });
         await pushAdmin(
           admin,
           '🚨 Socially.ng balance critically low',
@@ -202,22 +210,64 @@ Deno.serve(async (req: Request) => {
     }
     console.log(`Paystack available: ₦${paystackAvailable}`);
 
-    // Sum payout reserve (under_review + approved payouts not yet sent)
-    const { data: reservedPayouts } = await admin
+    // Reserve = payouts owed but not sent + what active leads have earned this
+    // month that is not yet in a payout row (same maths as admin-withdrawable).
+    const { data: reservedPayouts, error: payoutsErr } = await admin
       .from('lead_payouts')
       .select('amount')
-      .in('status', ['under_review', 'approved']);
+      .in('status', ['pending', 'under_review', 'approved', 'held', 'failed']);
+    const { data: activeLeads, error: leadsErr } = await admin
+      .from('acquisition_participants')
+      .select('qualification_customers_count')
+      .eq('status', 'active_lead');
+    if (payoutsErr || leadsErr) {
+      const dbMsg = (payoutsErr ?? leadsErr)!.message;
+      console.error('Reserve lookup failed:', dbMsg);
+      await pushAdmin(
+        admin, '🚨 Socially.ng top-up skipped',
+        `Could not read ambassador obligations, so no money was moved. DB error: ${dbMsg}`,
+        { type: 'socially_topup_reserve_failed', error: dbMsg },
+      ).catch(() => {});
+      return new Response(JSON.stringify({ action: 'error', reason: 'reserve_lookup_failed', error: dbMsg }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
-    const payoutReserve = (reservedPayouts || []).reduce(
+    const payoutsOwed = (reservedPayouts || []).reduce(
       (s: number, p: any) => s + Number(p.amount), 0,
     );
-    console.log(`Payout reserve: ₦${payoutReserve}`);
+    let leadAccruing = 0;
+    for (const p of activeLeads || []) {
+      const count = Number(p.qualification_customers_count ?? 0);
+      const earned = count * (LEAD_MONTHLY_PAY / LEAD_MONTHLY_TARGET);
+      const alreadyInPayout = count >= LEAD_MONTHLY_TARGET / 2 ? LEAD_MONTHLY_PAY / 2 : 0;
+      leadAccruing += Math.max(0, earned - alreadyInPayout);
+    }
+    const payoutReserve = Math.ceil(payoutsOwed + leadAccruing);
+    console.log(`Payout reserve: ₦${payoutReserve} (owed ₦${payoutsOwed}, accruing ₦${Math.round(leadAccruing)})`);
 
     const paystackFree = paystackAvailable - payoutReserve;
     console.log(`Paystack free (after reserve): ₦${paystackFree}`);
 
-    if (paystackFree < TOPUP_AMOUNT) {
-      const msg = `Socially.ng balance is ₦${sociallyBalance.toLocaleString()} and Paystack has less than ₦${TOPUP_AMOUNT.toLocaleString()} free to top it up. Paystack available: ₦${paystackAvailable.toLocaleString()}, reserved for payouts: ₦${payoutReserve.toLocaleString()}, free: ₦${paystackFree.toLocaleString()}.`;
+    // Demand: wholesale cost of numbers sold in the last hour.
+    const demandSince = new Date(Date.now() - DEMAND_WINDOW_MINUTES * 60 * 1000).toISOString();
+    const { data: recentOrders } = await admin
+      .from('orders')
+      .select('amount_paid')
+      .gte('created_at', demandSince);
+    const recentWholesale = (recentOrders || []).reduce(
+      (s: number, o: any) => s + Math.max(0, Number(o.amount_paid) - FLAT_ACQUISITION_FEE), 0,
+    );
+    const plannedAmount = Math.min(
+      MAX_TOPUP,
+      Math.max(MIN_TOPUP, Math.ceil((recentWholesale * DEMAND_MULTIPLIER) / 1000) * 1000),
+    );
+    const topupAmount = Math.min(plannedAmount, Math.floor(paystackFree / 1000) * 1000);
+    const isPartial = topupAmount < plannedAmount;
+    console.log(`Demand: ₦${recentWholesale} wholesale in last ${DEMAND_WINDOW_MINUTES} min → planned ₦${plannedAmount}, sending ₦${topupAmount}`);
+
+    if (topupAmount < MIN_TOPUP) {
+      const msg = `Socially.ng balance is ₦${sociallyBalance.toLocaleString()} and Paystack has less than ₦${MIN_TOPUP.toLocaleString()} free to top it up. Paystack available: ₦${paystackAvailable.toLocaleString()}, reserved for ambassador payouts: ₦${payoutReserve.toLocaleString()}, free: ₦${paystackFree.toLocaleString()}.`;
       console.warn(msg);
       const thirtyMinAgoC = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       const { data: recentCannotTopup } = await admin
@@ -233,7 +283,7 @@ Deno.serve(async (req: Request) => {
           status: 'failed',
           trigger_reason: 'alert_cannot_topup',
           error_message: msg,
-        }).catch(() => {});
+        });
         await pushAdmin(
           admin,
           '⚠️ Cannot top up Socially.ng — insufficient Paystack balance',
@@ -248,7 +298,7 @@ Deno.serve(async (req: Request) => {
         paystack_available: paystackAvailable,
         payout_reserve: payoutReserve,
         paystack_free: paystackFree,
-        topup_amount: TOPUP_AMOUNT,
+        planned_amount: plannedAmount,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -257,7 +307,7 @@ Deno.serve(async (req: Request) => {
     const { error: insertErr } = await admin.from('socially_transfers').insert({
       order_reference: ref,
       paystack_transfer_reference: ref,
-      amount_transferred: TOPUP_AMOUNT,
+      amount_transferred: topupAmount,
       status: 'pending',
       trigger_reason: 'low_balance_auto',
     });
@@ -286,6 +336,13 @@ Deno.serve(async (req: Request) => {
       }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    const alertPartial = () => pushAdmin(
+      admin,
+      '⚠️ Socially.ng got a partial top-up',
+      `Demand called for ₦${plannedAmount.toLocaleString()} but only ₦${topupAmount.toLocaleString()} was free after holding ₦${payoutReserve.toLocaleString()} for ambassador payouts. Socially balance was ₦${sociallyBalance.toLocaleString()}.`,
+      { type: 'socially_topup_partial', planned: plannedAmount, sent: topupAmount },
+    ).catch(() => {});
+
     // ── 6. Get or create Paystack recipient for Socially.ng ───────────────────
     let recipientCode: string;
     try {
@@ -307,8 +364,8 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── 7. Fire Paystack transfer ─────────────────────────────────────────────
-    const amountKobo = Math.round(TOPUP_AMOUNT * 100);
-    console.log(`Firing Paystack transfer: ₦${TOPUP_AMOUNT} → ${SOCIALLY_ACCOUNT_NUMBER} (ref: ${ref})`);
+    const amountKobo = Math.round(topupAmount * 100);
+    console.log(`Firing Paystack transfer: ₦${topupAmount} → ${SOCIALLY_ACCOUNT_NUMBER} (ref: ${ref})`);
 
     let psTransferRes: Response;
     let psTransferData: any;
@@ -380,9 +437,10 @@ Deno.serve(async (req: Request) => {
       }).eq('order_reference', ref);
 
       console.log(`Top-up succeeded. Transfer code: ${transferCode}`);
+      if (isPartial) await alertPartial();
       return new Response(JSON.stringify({
         action: 'topped_up',
-        amount: TOPUP_AMOUNT,
+        amount: topupAmount,
         transfer_code: transferCode,
         reference: ref,
         socially_balance_before: sociallyBalance,
@@ -406,9 +464,10 @@ Deno.serve(async (req: Request) => {
           recipient_code: recipientCode,
           error_message: null,
         }).eq('order_reference', ref);
+        if (isPartial) await alertPartial();
         return new Response(JSON.stringify({
           action: 'topped_up',
-          amount: TOPUP_AMOUNT,
+          amount: topupAmount,
           transfer_code: vc,
           reference: ref,
           verified_after_error: true,
@@ -418,7 +477,7 @@ Deno.serve(async (req: Request) => {
         // Leave as pending; will resolve via webhook or next check
         return new Response(JSON.stringify({
           action: 'pending',
-          amount: TOPUP_AMOUNT,
+          amount: topupAmount,
           transfer_code: vc,
           reference: ref,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -436,7 +495,7 @@ Deno.serve(async (req: Request) => {
     await pushAdmin(
       admin,
       '🚨 Socially.ng auto top-up FAILED',
-      `Paystack transfer of ₦${TOPUP_AMOUNT.toLocaleString()} to Socially.ng failed. Reason: ${failReason}. Socially balance was ₦${sociallyBalance.toLocaleString()}.`,
+      `Paystack transfer of ₦${topupAmount.toLocaleString()} to Socially.ng failed. Reason: ${failReason}. Socially balance was ₦${sociallyBalance.toLocaleString()}.`,
       { type: 'socially_topup_transfer_failed', reason: failReason, socially_balance: sociallyBalance },
     ).catch(() => {});
 

@@ -92,9 +92,10 @@ Deno.serve(async (req: Request) => {
       callback_url: 'https://numvault.app/payment/callback',
       channels: ['card', 'bank_transfer', 'ussd', 'bank'],
       metadata: {
+        ...(paystackMeta || {}),
+        // Set after the spread so client metadata can never override who paid or why.
         user_id: user.id,
         type: type || 'number_purchase',
-        ...(paystackMeta || {}),
       },
     };
 

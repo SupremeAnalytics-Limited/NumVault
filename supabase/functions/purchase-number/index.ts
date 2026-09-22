@@ -22,9 +22,10 @@ Deno.serve(async (req: Request) => {
       { global: { headers: { Authorization: `Bearer ${token}` } } }
     );
 
-    // When called by the webhook safety net, a user JWT is not available.
-    // The webhook passes x-webhook-user-id (trusted — caller uses service role key).
-    const webhookUserId = req.headers.get('x-webhook-user-id');
+    // The Paystack webhook calls with the service role key and x-webhook-user-id.
+    // Only that caller may name a user or skip payment verification.
+    const isServiceCall = !!token && token === (Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
+    const webhookUserId = isServiceCall ? req.headers.get('x-webhook-user-id') : null;
     let user: { id: string };
 
     if (webhookUserId) {
@@ -51,8 +52,8 @@ Deno.serve(async (req: Request) => {
       amount_paid,
       paystack_reference,
       use_wallet,
-      webhook_verified,
     } = body;
+    const webhook_verified = isServiceCall && body.webhook_verified === true;
 
     if (!provider_code || !country_code || !project_code) {
       return new Response(JSON.stringify({ error: 'Missing required fields: provider_code, country_code, project_code' }), {
@@ -66,6 +67,7 @@ Deno.serve(async (req: Request) => {
     // This prevents clients from sending a manipulated amount_paid value.
     // Pricing model: customer pays wholesale + ₦1,500 flat fee.
     const FLAT_ACQUISITION_FEE = 1500; // ₦1,500
+    let expectedRetail: number | null = null;
     try {
       const socially_url = Deno.env.get('SUPABASE_URL') ?? '';
       const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -89,7 +91,7 @@ Deno.serve(async (req: Request) => {
       );
       if (matchingPkg) {
         const wholesale = Number(matchingPkg.price ?? 0);
-        const expectedRetail = Math.ceil(wholesale + FLAT_ACQUISITION_FEE);
+        expectedRetail = Math.ceil(wholesale + FLAT_ACQUISITION_FEE);
         const clientRetail = Math.ceil(Number(amount_paid));
         // Allow ±50 naira tolerance (covers rounding and temporary price shifts)
         if (Math.abs(clientRetail - expectedRetail) > 50) {
@@ -106,12 +108,19 @@ Deno.serve(async (req: Request) => {
         }
         console.log(`Price validated: client=${clientRetail}, server=${expectedRetail} (wholesale=${wholesale} + fee=1500) ✓`);
       } else {
-        console.warn(`Price validation: package ${project_code} not found in response — proceeding without validation`);
+        console.warn(`Price validation: package ${project_code} not found in response`);
       }
     } catch (priceErr) {
-      // Price validation is a best-effort guard. If the proxy is temporarily
-      // unavailable, log the failure and continue rather than blocking the purchase.
-      console.warn('Price validation fetch failed (non-blocking):', priceErr);
+      console.warn('Price validation fetch failed:', priceErr);
+    }
+    if (expectedRetail === null) {
+      // Without a server price we cannot trust amount_paid, so nothing is charged.
+      return new Response(JSON.stringify({
+        error: 'We could not confirm the price for this service. Please try again in a moment.',
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 503,
+      });
     }
     // ── END PRICE VALIDATION ─────────────────────────────────────────────────
     if (!use_wallet && !paystack_reference) {
@@ -251,6 +260,29 @@ Deno.serve(async (req: Request) => {
         }
 
         paidAmount = verifyData.data.amount / 100;
+
+        let meta = verifyData.data.metadata;
+        if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch { meta = null; } }
+        const payerOk = meta?.user_id === user.id;
+        const typeOk = (meta?.type ?? 'number_purchase') === 'number_purchase';
+        if (!payerOk || !typeOk) {
+          console.warn(`Paystack ref ${paystack_reference} rejected: metadata user=${meta?.user_id} type=${meta?.type}, caller=${user.id}`);
+          return new Response(JSON.stringify({ error: 'This payment does not belong to this purchase.' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 403,
+          });
+        }
+      }
+
+      // Both Paystack routes: the amount actually paid must cover the price.
+      if (paidAmount < expectedRetail - 50) {
+        console.warn(`Paystack ref ${paystack_reference} underpaid: paid ₦${paidAmount}, price ₦${expectedRetail}`);
+        return new Response(JSON.stringify({
+          error: `Payment of ₦${paidAmount.toLocaleString()} does not cover the price of ₦${expectedRetail.toLocaleString()}. Please contact support.`,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 402,
+        });
       }
       // ────────────────────────────────────────────────────────────────────────
     }

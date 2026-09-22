@@ -8,7 +8,17 @@ Deno.serve(async (req: Request) => {
   if (corsRes) return corsRes;
 
   try {
-    const payload = await req.json();
+    const secretKey = Deno.env.get('PAYSTACK_SECRET_KEY') ?? '';
+    const rawBody = await req.text();
+    const signature = req.headers.get('x-paystack-signature') ?? '';
+    if (!secretKey || !(await isValidPaystackSignature(rawBody, signature, secretKey))) {
+      console.warn('Paystack webhook rejected: invalid or missing signature');
+      return new Response(JSON.stringify({ error: 'Invalid signature' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const payload = JSON.parse(rawBody);
     console.log('Paystack webhook event:', payload.event);
 
     const supabaseAdmin = createClient(
@@ -16,7 +26,6 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const secretKey = Deno.env.get('PAYSTACK_SECRET_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 
     if (payload.event === 'charge.success') {
@@ -169,3 +178,16 @@ Deno.serve(async (req: Request) => {
     });
   }
 });
+
+async function isValidPaystackSignature(rawBody: string, signature: string, secretKey: string): Promise<boolean> {
+  if (!signature) return false;
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(secretKey), { name: 'HMAC', hash: 'SHA-512' }, false, ['sign'],
+  );
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody));
+  const expected = Array.from(new Uint8Array(mac)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  if (expected.length !== signature.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+  return diff === 0;
+}

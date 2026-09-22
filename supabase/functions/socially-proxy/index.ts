@@ -1,6 +1,23 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
 
 const SOCIALLY_BASE = 'https://socially.ng/api/v1';
+
+// Read-only catalogue calls anyone may make (prices and availability).
+const PUBLIC_PATHS = [
+  /^\/sms\/verification\/providers$/,
+  /^\/sms\/verification\/provider\/[A-Za-z0-9_-]+\/countries$/,
+  /^\/sms\/verification\/service\/provider\/packages$/,
+];
+// OTP lookup: allowed for a logged-in user, only for their own order.
+const OTP_PATH = /^\/request\/sms\/verification\/([A-Za-z0-9_-]+)\/otp$/;
+
+function jsonError(error: string, status: number): Response {
+  return new Response(JSON.stringify({ error }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    status,
+  });
+}
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req);
@@ -28,10 +45,41 @@ Deno.serve(async (req: Request) => {
   }
 
   if (!path) {
-    return new Response(JSON.stringify({ error: 'Missing path parameter' }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 400,
-    });
+    return jsonError('Missing path parameter', 400);
+  }
+
+  // Only Socially.ng paths — never forward the API token to another host.
+  if (!path.startsWith('/') || path.includes('..') || path.includes('//')) {
+    return jsonError('Invalid path', 400);
+  }
+
+  // ── Access control ──────────────────────────────────────────────────────────
+  // Server functions (purchase-number, confirm-otp) use the service role key and
+  // may call any path, including buying numbers. The app may only read the
+  // catalogue, and fetch OTPs for its own orders.
+  const bearer = (req.headers.get('Authorization') ?? '').replace('Bearer ', '').trim();
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const isServiceCall = !!bearer && bearer === serviceRoleKey;
+
+  if (!isServiceCall && !PUBLIC_PATHS.some((re) => re.test(path))) {
+    const otpMatch = path.match(OTP_PATH);
+    if (!otpMatch || method !== 'GET') {
+      return jsonError('Forbidden', 403);
+    }
+    const admin = createClient(Deno.env.get('SUPABASE_URL') ?? '', serviceRoleKey);
+    const { data: { user } } = await admin.auth.getUser(bearer);
+    if (!user) {
+      return jsonError('Unauthorized', 401);
+    }
+    const { data: order } = await admin
+      .from('orders')
+      .select('id')
+      .eq('order_reference', otpMatch[1])
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (!order) {
+      return jsonError('Forbidden', 403);
+    }
   }
 
   try {
@@ -57,7 +105,7 @@ Deno.serve(async (req: Request) => {
       fetchOptions.body = JSON.stringify(body);
     }
 
-    const url = path.startsWith('http') ? path : `${SOCIALLY_BASE}${path}`;
+    const url = `${SOCIALLY_BASE}${path}`;
     console.log(`Socially proxy: ${method} ${url}`, body ? `body: ${JSON.stringify(body)}` : '');
 
     const res = await fetch(url, fetchOptions);
