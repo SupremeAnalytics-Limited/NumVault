@@ -37,6 +37,7 @@
       "./plugins/disableSentryAutoUpload",
       "./plugins/fixMetroModuleIdFactory",
       "./plugins/removeStaleOnboardingAssets",
+      "./plugins/fixFmtConsteval",
       "expo-router",
       [
         "expo-splash-screen",
