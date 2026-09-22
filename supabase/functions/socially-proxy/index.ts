@@ -1,4 +1,3 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
 
 const SOCIALLY_BASE = 'https://socially.ng/api/v1';
@@ -9,8 +8,6 @@ const PUBLIC_PATHS = [
   /^\/sms\/verification\/provider\/[A-Za-z0-9_-]+\/countries$/,
   /^\/sms\/verification\/service\/provider\/packages$/,
 ];
-// OTP lookup: allowed for a logged-in user, only for their own order.
-const OTP_PATH = /^\/request\/sms\/verification\/([A-Za-z0-9_-]+)\/otp$/;
 
 function jsonError(error: string, status: number): Response {
   return new Response(JSON.stringify({ error }), {
@@ -55,31 +52,15 @@ Deno.serve(async (req: Request) => {
 
   // ── Access control ──────────────────────────────────────────────────────────
   // Server functions (purchase-number, confirm-otp) use the service role key and
-  // may call any path, including buying numbers. The app may only read the
-  // catalogue, and fetch OTPs for its own orders.
+  // may call any path. The app may only read the catalogue: OTPs are released
+  // through confirm-otp, which completes the order at the same time, so a
+  // customer can't read a code and still get the order refunded.
   const bearer = (req.headers.get('Authorization') ?? '').replace('Bearer ', '').trim();
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const isServiceCall = !!bearer && bearer === serviceRoleKey;
 
   if (!isServiceCall && !PUBLIC_PATHS.some((re) => re.test(path))) {
-    const otpMatch = path.match(OTP_PATH);
-    if (!otpMatch || method !== 'GET') {
-      return jsonError('Forbidden', 403);
-    }
-    const admin = createClient(Deno.env.get('SUPABASE_URL') ?? '', serviceRoleKey);
-    const { data: { user } } = await admin.auth.getUser(bearer);
-    if (!user) {
-      return jsonError('Unauthorized', 401);
-    }
-    const { data: order } = await admin
-      .from('orders')
-      .select('id')
-      .eq('order_reference', otpMatch[1])
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (!order) {
-      return jsonError('Forbidden', 403);
-    }
+    return jsonError('Forbidden', 403);
   }
 
   try {

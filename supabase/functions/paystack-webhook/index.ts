@@ -70,37 +70,20 @@ Deno.serve(async (req: Request) => {
       // already exists, a duplicate webhook delivery must NOT credit the wallet
       // again. This is the single source of truth for wallet funding.
       if (type === 'wallet_topup') {
-        // Check for duplicate webhook delivery
-        const { data: existingTx } = await supabaseAdmin
-          .from('transactions')
-          .select('id')
-          .eq('reference', reference)
-          .eq('type', 'credit')
-          .maybeSingle();
-
-        if (existingTx) {
-          console.log(`Wallet top-up idempotency: reference ${reference} already credited (tx: ${existingTx.id}) — skipping duplicate`);
+        // credit_wallet records the credit and updates the balance together,
+        // and returns null if this reference was already credited.
+        const { data: newBalance, error: creditErr } = await supabaseAdmin.rpc('credit_wallet', {
+          p_user_id: userId,
+          p_amount: amount,
+          p_reference: reference,
+          p_description: 'Wallet top-up via Paystack',
+        });
+        if (creditErr) {
+          console.error(`Wallet top-up credit FAILED for ${reference}:`, creditErr);
+        } else if (newBalance === null) {
+          console.log(`Wallet top-up idempotency: reference ${reference} already credited — skipping duplicate`);
         } else {
-          const { data: profile } = await supabaseAdmin
-            .from('user_profiles')
-            .select('wallet_balance')
-            .eq('id', userId)
-            .single();
-
-          const newBalance = Number(profile?.wallet_balance || 0) + amount;
-          await supabaseAdmin.from('user_profiles')
-            .update({ wallet_balance: newBalance })
-            .eq('id', userId);
-
-          await supabaseAdmin.from('transactions').insert({
-            user_id: userId,
-            amount,
-            type: 'credit',
-            reference,
-            description: 'Wallet top-up via Paystack',
-          });
-
-          console.log(`Wallet credited: ₦${amount} (full top-up) for user ${userId}. Paystack split settled separately to Socially.ng subaccount.`);
+          console.log(`Wallet credited: ₦${amount} (full top-up) for user ${userId}, new balance ₦${newBalance}.`);
         }
       }
 

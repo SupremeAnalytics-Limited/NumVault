@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
+import { fetchSociallyOtp } from '../_shared/socially-otp.ts';
 
 // auto-expire-orders — server-side scheduled expiry scanner
 //
@@ -61,7 +62,7 @@ Deno.serve(async (req: Request) => {
     // Fetch all pending orders older than the timeout window.
     const { data: staleOrders, error: fetchErr } = await supabaseAdmin
       .from('orders')
-      .select('id, user_id, amount_paid, project_name')
+      .select('id, user_id, amount_paid, project_name, order_reference')
       .eq('status', 'pending')
       .lt('created_at', cutoff);
 
@@ -89,6 +90,18 @@ Deno.serve(async (req: Request) => {
       const orderId: string     = order.id;
       const userId: string      = order.user_id;
       const projectName: string = order.project_name ?? 'Purchase';
+
+      // If the OTP did arrive, the customer got what they paid for: complete, don't refund.
+      const lateOtp = await fetchSociallyOtp(order.order_reference ?? '');
+      if (lateOtp) {
+        const { error: completeErr } = await supabaseAdmin.rpc('complete_order_with_otp', {
+          p_order_id: orderId, p_otp: lateOtp,
+        });
+        if (completeErr) console.error(`auto-expire-orders: complete failed for ${orderId}`, completeErr);
+        else console.log(`auto-expire-orders: OTP had arrived for ${orderId} — completed instead of refunding`);
+        skipped.push(orderId);
+        continue;
+      }
 
       // ── Atomic expiry: one DB transaction does expire + credit + tx record ──
       const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc(

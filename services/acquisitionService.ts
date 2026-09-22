@@ -138,18 +138,6 @@ export function daysRemainingInCurrentWindow(participant: AcquisitionParticipant
   return daysRemainingInQualification(participant.qualification_start_date);
 }
 
-// ── Generate unique referral code ─────────────────────────────────────────────
-
-function generateReferralCode(name: string): string {
-  const base = name
-    .replace(/\s+/g, '')
-    .toUpperCase()
-    .slice(0, 4)
-    .replace(/[^A-Z0-9]/g, 'X');
-  const rand = Math.random().toString(36).toUpperCase().slice(2, 6);
-  return `NV${base}${rand}`;
-}
-
 // ── Participant queries ───────────────────────────────────────────────────────
 
 export async function getMyParticipant(): Promise<AcquisitionParticipant | null> {
@@ -168,44 +156,14 @@ export async function enrollInProgram(name: string): Promise<AcquisitionParticip
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  let code = generateReferralCode(name);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { data: existing } = await supabase
-      .from('acquisition_participants')
-      .select('id')
-      .eq('referral_code', code)
-      .maybeSingle();
-    if (!existing) break;
-    code = generateReferralCode(name);
-  }
-
-  const now = new Date().toISOString();
-  const { data, error } = await supabase
-    .from('acquisition_participants')
-    .insert({
-      user_id: user.id,
-      name: name.trim(),
-      referral_code: code,
-      status: 'qualifying',
-      qualification_start_date: now,
-      qualification_customers_count: 0,
-    })
-    .select()
-    .single();
+  const { data, error } = await supabase.rpc('enroll_in_program', { p_name: name.trim() });
   if (error) throw new Error(error.message);
-  return data;
+  return data as AcquisitionParticipant;
 }
 
-export async function reEnrollInProgram(participantId: string): Promise<void> {
-  const now = new Date().toISOString();
-  const { error } = await supabase
-    .from('acquisition_participants')
-    .update({
-      status: 'qualifying',
-      qualification_start_date: now,
-      qualification_customers_count: 0,
-    })
-    .eq('id', participantId);
+// participantId is kept for callers; the server re-enrols the signed-in user.
+export async function reEnrollInProgram(_participantId: string): Promise<void> {
+  const { error } = await supabase.rpc('reenroll_in_program');
   if (error) throw new Error(error.message);
 }
 

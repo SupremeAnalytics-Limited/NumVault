@@ -360,33 +360,22 @@ Deno.serve(async (req: Request) => {
       // guaranteed to be the ONLY caller that reaches this point for this reference.
       console.log(`Socially purchase failed. Refunding ₦${paidAmount} to user ${user.id}`);
       try {
-        const { data: profileNow } = await supabaseAdmin
-          .from('user_profiles')
-          .select('wallet_balance')
-          .eq('id', user.id)
-          .single();
-
-        const newBalance = Number(profileNow?.wallet_balance || 0) + paidAmount;
-        await supabaseAdmin
-          .from('user_profiles')
-          .update({ wallet_balance: newBalance })
-          .eq('id', user.id);
-
         const refundRef = use_wallet
           ? `rollback_${user.id.slice(0, 8)}_${Date.now()}`
-          : (paystack_reference || `refund_${Date.now()}`);
+          : paystack_reference;
 
-        await supabaseAdmin.from('transactions').insert({
-          user_id: user.id,
-          amount: paidAmount,
-          type: 'credit',
-          reference: refundRef,
-          description: use_wallet
+        const { data: newBalance, error: refundErr } = await supabaseAdmin.rpc('credit_wallet', {
+          p_user_id: user.id,
+          p_amount: paidAmount,
+          p_reference: refundRef,
+          p_description: use_wallet
             ? `Wallet rollback: ${project_name || project_code} purchase failed — ${sociallyError}`
             : `Refund: ${project_name || project_code} purchase failed — ${sociallyError}`,
         });
-
-        console.log(`Refund/rollback credited: ₦${paidAmount} → user ${user.id}, new balance: ${newBalance}`);
+        if (refundErr) throw refundErr;
+        console.log(newBalance === null
+          ? `Refund skipped: ${refundRef} was already credited`
+          : `Refund/rollback credited: ₦${paidAmount} → user ${user.id}, new balance: ${newBalance}`);
       } catch (refundErr) {
         console.error('CRITICAL: Refund/rollback step failed after Socially error:', refundErr);
       }
@@ -443,28 +432,15 @@ Deno.serve(async (req: Request) => {
     if (orderError) {
       console.error('Order insert error:', orderError);
       try {
-        const { data: profileNow2 } = await supabaseAdmin
-          .from('user_profiles')
-          .select('wallet_balance')
-          .eq('id', user.id)
-          .single();
-
-        const newBalance = Number(profileNow2?.wallet_balance || 0) + paidAmount;
-        await supabaseAdmin
-          .from('user_profiles')
-          .update({ wallet_balance: newBalance })
-          .eq('id', user.id);
-
-        await supabaseAdmin.from('transactions').insert({
-          user_id: user.id,
-          amount: paidAmount,
-          type: 'credit',
-          reference: paystack_reference || `rollback_${user.id.slice(0, 8)}_${Date.now()}`,
-          description: use_wallet
+        const { error: refundErr } = await supabaseAdmin.rpc('credit_wallet', {
+          p_user_id: user.id,
+          p_amount: paidAmount,
+          p_reference: use_wallet ? `rollback_${user.id.slice(0, 8)}_${Date.now()}` : paystack_reference,
+          p_description: use_wallet
             ? `Wallet rollback: order save failed for ${project_name || project_code}`
             : `Refund: order save failed for ${project_name || project_code}`,
         });
-
+        if (refundErr) throw refundErr;
         console.log(`Refund/rollback credited (order save failure): ₦${paidAmount} → user ${user.id}`);
       } catch (refundErr) {
         console.error('CRITICAL: Refund/rollback step failed after order insert error:', refundErr);

@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
+import { fetchSociallyOtp } from '../_shared/socially-otp.ts';
 
 // expire-order — client-triggered order expiry
 //
@@ -61,7 +62,7 @@ Deno.serve(async (req: Request) => {
     // reject cross-user expiry attempts at the edge layer.
     const { data: order, error: orderErr } = await supabaseAdmin
       .from('orders')
-      .select('id, user_id, status, amount_paid, project_name')
+      .select('id, user_id, status, amount_paid, project_name, order_reference')
       .eq('id', order_id)
       .single();
 
@@ -87,6 +88,21 @@ Deno.serve(async (req: Request) => {
         refunded: false,
         already_handled: true,
         status: order.status,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // If the OTP did arrive, complete the order instead of refunding it.
+    const lateOtp = await fetchSociallyOtp(order.order_reference ?? '');
+    if (lateOtp) {
+      const { data: done } = await supabaseAdmin.rpc('complete_order_with_otp', {
+        p_order_id: order_id, p_otp: lateOtp,
+      });
+      return new Response(JSON.stringify({
+        refunded: false,
+        already_handled: true,
+        status: done?.result === 'completed' ? 'completed' : (done?.status ?? order.status),
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
