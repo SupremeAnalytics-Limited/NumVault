@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, ActivityIndicator, Share, TextInput,
-  KeyboardAvoidingView, Platform, Dimensions, Modal, Animated,
+  KeyboardAvoidingView, Platform, Dimensions, Modal, Animated, AppState,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -643,8 +643,8 @@ export default function AcquisitionProgramScreen() {
                             <MaterialIcons name="calendar-today" size={15} color={GREEN} />
                           </View>
                           <View>
-                            <Text style={styles.statLabel}>Days remaining</Text>
-                            <Text style={styles.statVal}>{daysLeft}</Text>
+                            <Text style={styles.statLabel}>Time remaining</Text>
+                            <Countdown startIso={participant.qualification_start_date} />
                           </View>
                         </View>
                       </View>
@@ -716,7 +716,7 @@ export default function AcquisitionProgramScreen() {
                           <Text style={styles.topCardHeadline}>
                             {monthsRemaining} months <Text style={{ color: GREEN }}>remaining</Text>
                           </Text>
-                          <Text style={styles.topCardSub}>{daysLeft} days left this month.{'\n'}Reach 76 early and your next month starts straight away.</Text>
+                          <Text style={styles.topCardSub}>Reach 76 early and your next month starts straight away.</Text>
                         </View>
                         <View style={styles.topCardRight}>
                           <Text style={styles.topCardLabel}>Potential remaining</Text>
@@ -740,8 +740,8 @@ export default function AcquisitionProgramScreen() {
                             <MaterialIcons name="people" size={15} color={GREEN} />
                           </View>
                           <View>
-                            <Text style={styles.statLabel}>Days remaining</Text>
-                            <Text style={styles.statVal}>{daysLeft}</Text>
+                            <Text style={styles.statLabel}>Month {blockNum} ends in</Text>
+                            <Countdown startIso={participant.paid_period_start_date} />
                           </View>
                         </View>
                       </View>
@@ -1091,6 +1091,31 @@ export default function AcquisitionProgramScreen() {
 }
 
 // ── Segmented bar ─────────────────────────────────────────────────────────────
+
+// Live countdown to the end of a 30-day (720-hour) window. Derived from the
+// window's start date each tick, so it stays correct after the app is closed.
+const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+function Countdown({ startIso }: { startIso: string | null | undefined }) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    const sub = AppState.addEventListener('change', (st) => { if (st === 'active') setNow(Date.now()); });
+    return () => { clearInterval(tick); sub.remove(); };
+  }, []);
+
+  if (!startIso) return <Text style={styles.statVal}>--</Text>;
+
+  const left = Math.max(0, new Date(startIso).getTime() + WINDOW_MS - now);
+  const s = Math.floor(left / 1000);
+  const d = Math.floor(s / 86400);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const text = `${d}d ${pad(Math.floor((s % 86400) / 3600))}h ${pad(Math.floor((s % 3600) / 60))}m ${pad(s % 60)}s`;
+  const color = left <= 3_600_000 ? '#f87171' : left <= 86_400_000 ? '#fb923c' : undefined;
+
+  return <Text style={[styles.statVal, color ? { color } : null]}>{text}</Text>;
+}
 
 function SegBar({ filled, total }: { filled: number; total: number }) {
   const segments = Array.from({ length: total }, (_, i) => i < filled);
