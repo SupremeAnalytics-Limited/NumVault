@@ -261,7 +261,7 @@ export default function AcquisitionProgramScreen() {
   };
 
   const handleEnroll = async () => {
-    if (!enrollName.trim()) { showAlert('Nickname required', 'Please enter a referral nickname to accept the offer.'); return; }
+    if (!enrollName.trim()) { showAlert('Nickname required', 'Please enter a nickname to continue.'); return; }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setEnrolling(true);
     try {
@@ -511,69 +511,26 @@ export default function AcquisitionProgramScreen() {
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             <View style={styles.heroCard}>
               <View style={styles.heroIcon}>
-                <MaterialIcons name="work" size={32} color={GREEN} />
+                <MaterialIcons name="badge" size={32} color={GREEN} />
               </View>
-              <Text style={styles.heroTitle}>We're Hiring Acquisition Staffs</Text>
+              <Text style={styles.heroTitle}>Choose a Nickname</Text>
               <Text style={styles.heroSub}>
-                NumVault is a cloud service company that helps Africans get US phone numbers. We're hiring independent acquisition staffs to drive customer growth.
-              </Text>
-            </View>
-
-            {[
-              {
-                title: 'Your 30-Day Qualification',
-                body: "Acquire 76 validated customers within 30 days to activate your staff account. Hit the target and you're live.",
-              },
-              {
-                title: "What Happens When You're Active",
-                body: 'You earn ₦100,000 a month for hitting targets. The total offer runs for six months, earning you ₦600,000.',
-              },
-              {
-                title: 'What Works',
-                body: "Based on our transaction data, the highest-converting entry point is meeting people in person and showing them how they can get a US number. That's where the momentum is.",
-              },
-            ].map((sec) => (
-              <View key={sec.title} style={styles.ruleCard}>
-                <Text style={styles.ruleTitle}>{sec.title}</Text>
-                <Text style={styles.ruleText}>{sec.body}</Text>
-              </View>
-            ))}
-
-            <View style={styles.ruleCard}>
-              <Text style={styles.ruleTitle}>The Requirements</Text>
-              {[
-                'First 76 customers are your qualification phase',
-                'You have 30 days from start date',
-                'Progress checkpoints at 19, 38, and 57 customers',
-                "Clicks and signups don't count—each customer must complete at least one purchase",
-                'At 76 customers, you automatically become active',
-              ].map((r, i) => (
-                <View key={i} style={styles.ruleRow}>
-                  <View style={styles.ruleDot} />
-                  <Text style={styles.ruleText}>{r}</Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.ruleCard}>
-              <Text style={styles.ruleTitle}>Limited Capacity</Text>
-              <Text style={styles.ruleText}>
-                We're hiring a limited number of acquisition staffs. When we hit capacity, this position closes.
+                For your privacy, we use a nickname instead of your real name. Pick one you'll recognise — it's also used to make your referral code.
               </Text>
             </View>
 
             <View style={styles.formCard}>
-              <Text style={styles.formLabel}>Your Referral Nickname</Text>
+              <Text style={styles.formLabel}>Your Nickname</Text>
               <TextInput
                 style={styles.formInput}
                 value={enrollName}
                 onChangeText={setEnrollName}
-                placeholder="Enter a nickname"
+                placeholder="e.g. BlueFalcon"
                 placeholderTextColor="#3a6a3a"
                 autoCapitalize="words"
                 returnKeyType="done"
               />
-              <Text style={styles.formHint}>Your referral code is made from this nickname.</Text>
+              <Text style={styles.formHint}>Please don't use your real name.</Text>
             </View>
 
             <TouchableOpacity
@@ -583,7 +540,7 @@ export default function AcquisitionProgramScreen() {
               activeOpacity={0.85}
             >
               {enrolling ? <ActivityIndicator color="#061006" /> : (
-                <Text style={styles.ctaBtnText}>Accept Job Offer</Text>
+                <Text style={styles.ctaBtnText}>Proceed to Your Dashboard</Text>
               )}
             </TouchableOpacity>
 
