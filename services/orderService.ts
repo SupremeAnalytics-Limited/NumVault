@@ -84,9 +84,14 @@ export async function fetchTransactions(): Promise<Transaction[]> {
 }
 
 export async function fetchProfile() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  // Filter by id: the admin can read every profile, so .single() alone fails.
   const { data, error } = await supabase
     .from('user_profiles')
     .select('*')
+    .eq('id', user.id)
     .single();
 
   if (error) throw new Error(error.message);
