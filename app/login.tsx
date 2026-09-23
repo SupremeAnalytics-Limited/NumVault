@@ -240,7 +240,7 @@ export default function LoginScreen() {
               transition={200}
             />
             <Text style={styles.logoText}>NumVault</Text>
-            <Text style={styles.logoSub}>SMS Verification Numbers, Instantly</Text>
+            <Text style={styles.logoSub}>Privacy should not be optional by Default.</Text>
           </View>
 
           {/* Mode Toggle — hidden on forgot password screen */}
