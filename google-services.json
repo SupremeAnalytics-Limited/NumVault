@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "787371714884",
+    "project_id": "numvault-cloud",
+    "storage_bucket": "numvault-cloud.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:787371714884:android:4cfb1ae81c5286fa8d4f11",
+        "android_client_info": {
+          "package_name": "cloud.numvault.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBqz2A_VX3HxuVYyUmq3IBxLye_7lZel0M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -27,7 +27,8 @@
         "backgroundColor": "#0D1117"
       },
       "edgeToEdgeEnabled": true,
-      "package": "cloud.numvault.app"
+      "package": "cloud.numvault.app",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "bundler": "metro",
