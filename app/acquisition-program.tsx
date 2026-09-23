@@ -44,14 +44,15 @@ const LANDING_STEPS = [
     label: 'Customer Acquisition Lead commitment',
     icon: 'emoji-events' as const,
     title: 'Earn your Job Position with our company as a Customer Acquisition Lead',
-    body: 'You are a Brand Ambassador for NumVault. Share your referral code. A referral counts when a new customer signs up with your code and pays for at least one number. Each customer must have a different email address and counts once. Your first 76 customers are an unpaid qualification, and you have 30 days to reach them. At 76 you are brought on automatically as a Customer Acquisition Lead and your Staff Dashboard opens. Each month, 76 customers earns you ₦100,000, paid in two halves of ₦50,000. You have 30 days for each month, and if you reach 76 sooner your next month starts straight away. The contract is for six months, for up to ₦600,000 in total. Every payout is reviewed before it is sent. We pay by Paystack to Nigerian bank accounts, including Palmpay, Kuda and Opay. No card details. If you want to extend your contract beyond six months, email support@numvault.cloud.',
+    body: 'You are a Brand Ambassador for NumVault. Share your referral code. A referral counts when a new customer signs up with your code and pays for at least one number. Each customer must have a different email address and counts once. Your first 76 customers are an unpaid qualification, and you have 30 days to reach them. Your progress is saved every 19 customers (19, 38 and 57): if your 30 days end first, you keep your last checkpoint and a new 30 days starts. At 76 you are brought on automatically as a Customer Acquisition Lead and your Staff Dashboard opens. Each month, 76 customers earns you ₦100,000, paid in two halves of ₦50,000. You have 30 days for each month, and if you reach 76 sooner your next month starts straight away. The contract is for six months, for up to ₦600,000 in total. Every payout is reviewed before it is sent. We pay by Paystack to Nigerian bank accounts, including Palmpay, Kuda and Opay. No card details. If you want to extend your contract beyond six months, email support@numvault.cloud.',
   },
 ];
 
 const QUAL_RULES = [
   "Refer 76 paying customers within 30 days. This stage is unpaid.",
   "Go at your own pace. No daily targets.",
-  "If your 30 days run out before you reach 76, your count resets to 0 and you can start again.",
+  "Your progress is saved every 19 customers (19, 38, 57). If your 30 days run out, you keep your last checkpoint and a new 30 days starts automatically.",
+  "Below 19 when your 30 days run out? Your count resets to 0 and you can re-enroll.",
 ];
 
 const PAID_RULES = [
@@ -350,6 +351,27 @@ export default function AcquisitionProgramScreen() {
     (participant?.status === 'qualifying' || participant?.status === 'needs_requalification') &&
     qualCount < 76;
 
+  // Below the first checkpoint when the window ended: sharing is paused until they re-enroll,
+  // because customers who buy now would not count.
+  const needsReEnroll =
+    participant?.status === 'needs_requalification' || participant?.status === 'inactive' ||
+    (windowExpired && qualCount < CHECKPOINT);
+  const carriedOver = participant?.status === 'qualifying' ? (participant.qualification_carried_over ?? 0) : 0;
+
+  const showCheckpointInfo = (cp?: number) => {
+    Haptics.selectionAsync().catch(() => {});
+    if (cp === undefined) {
+      showAlert('How checkpoints work',
+        'Your progress is saved every 19 customers: 19, 38 and 57. If your 30 days end before you reach 76, you keep your last checkpoint and a new 30 days starts automatically. Below 19, your count goes back to 0.');
+    } else if (qualCount >= cp) {
+      showAlert(`🔒 ${cp} saved`,
+        `You've brought ${cp} paying customers. If your 30 days end before you reach 76, you keep these ${cp} and a new 30 days starts automatically.`);
+    } else {
+      showAlert(`${cp}: not reached yet`,
+        `Bring ${cp - qualCount} more customer${cp - qualCount === 1 ? '' : 's'} to lock in ${cp}. Checkpoints save your progress at 19, 38 and 57.`);
+    }
+  };
+
   const blockNum = participant ? currentBlockNumber(participant) : 1;
   const monthsRemaining = paidPeriodsRemaining(participant ?? { paid_periods_completed: 0 } as AcquisitionParticipant);
   const potentialRemaining = monthsRemaining * 100000;
@@ -516,6 +538,7 @@ export default function AcquisitionProgramScreen() {
               {[
                 'The first 76 customers are an unpaid qualification stage.',
                 'You have 30 days to reach 76 validated customers.',
+                'Progress is saved every 19 customers (19, 38, 57) if your 30 days run out.',
                 'Referral clicks and signups alone do not count.',
                 'Each customer must successfully purchase at least one number.',
                 'At 76 customers you automatically become an active lead — no review needed.',
@@ -619,7 +642,9 @@ export default function AcquisitionProgramScreen() {
                           <Text style={styles.topCardHeadline}>
                             Earn your <Text style={{ color: GREEN }}>invite</Text>
                           </Text>
-                          <Text style={styles.topCardSub}>76 customers. Unlock your income.</Text>
+                          <Text style={styles.topCardSub}>
+                            {needsReEnroll ? 'Your 30 days are over. Re-enroll below to try again.' : '76 customers. Unlock your income.'}
+                          </Text>
                         </View>
                         <View style={styles.topCardRight}>
                           <Text style={styles.topCardLabel}>You can earn up to</Text>
@@ -648,6 +673,24 @@ export default function AcquisitionProgramScreen() {
                           </View>
                         </View>
                       </View>
+                    </View>
+
+                    <View style={styles.cpCard}>
+                      <View style={styles.cpHdr}>
+                        <Text style={styles.cpTitle}>
+                          Checkpoints{'  '}
+                          <Text style={{ color: GREEN }}>{Math.floor(Math.min(qualCount, 57) / CHECKPOINT) * CHECKPOINT} saved</Text>
+                        </Text>
+                        <TouchableOpacity onPress={() => showCheckpointInfo()} hitSlop={12} activeOpacity={0.7}>
+                          <MaterialIcons name="info-outline" size={18} color={MUTED} />
+                        </TouchableOpacity>
+                      </View>
+                      <CheckpointBar count={qualCount} onTap={showCheckpointInfo} />
+                      {carriedOver > 0 ? (
+                        <Text style={styles.cpCarried}>
+                          New 30 days started. {carriedOver} carried over from last time: {76 - qualCount} more to qualify.
+                        </Text>
+                      ) : null}
                     </View>
 
                     <View style={styles.scard}>
@@ -862,27 +905,35 @@ export default function AcquisitionProgramScreen() {
                       <Text style={styles.refCode}>{participant.referral_code}</Text>
                     </View>
                   </View>
-                  <TouchableOpacity style={styles.copyBtnLarge} onPress={copyCode} activeOpacity={0.85}>
-                    <MaterialIcons name={copiedCode ? 'check' : 'content-copy'} size={16} color="#061006" />
-                    <Text style={styles.copyBtnLargeText}>{copiedCode ? 'Copied!' : 'Copy Code'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.shareBtn} onPress={shareCode} activeOpacity={0.85}>
-                    <MaterialIcons name="share" size={15} color={GREEN} />
-                    <Text style={styles.shareBtnText}>Share referral code</Text>
-                  </TouchableOpacity>
+                  {needsReEnroll ? (
+                    <Text style={styles.requalText}>
+                      Sharing is paused. Customers who buy before you re-enroll will not count, so re-enroll first.
+                    </Text>
+                  ) : (
+                    <>
+                      <TouchableOpacity style={styles.copyBtnLarge} onPress={copyCode} activeOpacity={0.85}>
+                        <MaterialIcons name={copiedCode ? 'check' : 'content-copy'} size={16} color="#061006" />
+                        <Text style={styles.copyBtnLargeText}>{copiedCode ? 'Copied!' : 'Copy Code'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.shareBtn} onPress={shareCode} activeOpacity={0.85}>
+                        <MaterialIcons name="share" size={15} color={GREEN} />
+                        <Text style={styles.shareBtnText}>Share referral code</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
                 </View>
 
                 {/* Re-enroll button */}
-                {(windowExpired || participant.status === 'needs_requalification') && dashTab === 'proving' ? (
+                {needsReEnroll && dashTab === 'proving' ? (
                   <View style={{ paddingHorizontal: 16 }}>
-                    {participant.status === 'needs_requalification' ? (
-                      <View style={styles.requalCard}>
-                        <MaterialIcons name="info" size={14} color="#fb923c" />
-                        <Text style={styles.requalText}>
-                          Your last month ended without reaching 76. Re-enroll to start again.
-                        </Text>
-                      </View>
-                    ) : null}
+                    <View style={styles.requalCard}>
+                      <MaterialIcons name="info" size={14} color="#fb923c" />
+                      <Text style={styles.requalText}>
+                        {(participant.paid_periods_completed ?? 0) > 0
+                          ? 'Your last paid month ended without reaching 76. Re-enroll to start a new 30-day qualification.'
+                          : 'Your 30 days ended before your first checkpoint (19). Re-enroll to start a new 30 days from 0.'}
+                      </Text>
+                    </View>
                     <TouchableOpacity style={styles.reEnrollBtn} onPress={handleReEnroll} activeOpacity={0.85}>
                       <MaterialIcons name="refresh" size={18} color="#061006" />
                       <Text style={styles.reEnrollText}>Re-enroll (Reset 0/76)</Text>
@@ -1091,6 +1142,38 @@ export default function AcquisitionProgramScreen() {
 }
 
 // ── Segmented bar ─────────────────────────────────────────────────────────────
+
+const CHECKPOINT = 19;
+
+// Qualification progress in four steps of 19, with a tappable lock at 19, 38 and 57.
+function CheckpointBar({ count, onTap }: { count: number; onTap: (cp: number) => void }) {
+  return (
+    <View style={styles.cpRow}>
+      {[19, 38, 57, 76].map((end) => {
+        const fill = Math.max(0, Math.min(1, (count - (end - CHECKPOINT)) / CHECKPOINT));
+        const reached = count >= end;
+        return (
+          <React.Fragment key={end}>
+            <View style={styles.cpSeg}>
+              <View style={[styles.cpSegFill, { width: `${fill * 100}%` }]} />
+            </View>
+            {end < 76 ? (
+              <TouchableOpacity onPress={() => onTap(end)} hitSlop={10} activeOpacity={0.7} style={styles.cpLock}>
+                <MaterialIcons name={reached ? 'lock' : 'lock-open'} size={14} color={reached ? GREEN : MUTED} />
+                <Text style={[styles.cpLockText, reached && { color: GREEN }]}>{end}</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.cpLock}>
+                <MaterialIcons name="emoji-events" size={14} color={reached ? GREEN : MUTED} />
+                <Text style={[styles.cpLockText, reached && { color: GREEN }]}>76</Text>
+              </View>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+}
 
 // Live countdown to the end of a 30-day (720-hour) window. Derived from the
 // window's start date each tick, so it stays correct after the app is closed.
@@ -1351,6 +1434,18 @@ const styles = StyleSheet.create({
   },
   shareBtnText: { color: GREEN, fontSize: 13, fontWeight: '600' },
 
+  cpCard: {
+    marginHorizontal: 16, marginBottom: 12, padding: 14, borderRadius: 14,
+    backgroundColor: 'rgba(74,222,128,0.05)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.15)',
+  },
+  cpHdr: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  cpTitle: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  cpRow: { flexDirection: 'row', alignItems: 'center' },
+  cpSeg: { flex: 1, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+  cpSegFill: { height: 6, backgroundColor: GREEN },
+  cpLock: { alignItems: 'center', marginHorizontal: 4, minWidth: 22 },
+  cpLockText: { color: MUTED, fontSize: 10, fontWeight: '700', marginTop: 1 },
+  cpCarried: { color: GREEN, fontSize: 12, lineHeight: 18, marginTop: 10 },
   requalCard: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 8,
     backgroundColor: 'rgba(251,146,60,0.1)', borderWidth: 1, borderColor: 'rgba(251,146,60,0.35)',

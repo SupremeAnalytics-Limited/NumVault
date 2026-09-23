@@ -25,6 +25,7 @@ export interface AcquisitionParticipant {
   paystack_recipient_code: string | null;
   qualification_start_date: string | null;
   qualification_customers_count: number;
+  qualification_carried_over?: number;
   active_lead_start_month: string | null;
   paid_period_start_date: string | null;
   paid_periods_completed: number;

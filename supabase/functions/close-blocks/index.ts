@@ -91,9 +91,12 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // If a block was closed, notify admin
-    if (result?.closed && isAdmin === false) {
+    // Qualification windows (block 0) create no payout, so only paid months notify admin.
+    if (result?.closed && isAdmin === false && Number(result.block_number) > 0) {
       await sendAdminPush(supabaseAdmin, participantId, result).catch(() => {});
+    }
+    if (result?.closed && Number(result.carried_over) > 0) {
+      await sendCheckpointPush(supabaseAdmin, participantId, Number(result.carried_over)).catch(() => {});
     }
 
     return new Response(JSON.stringify({ ok: true, ...result }), {
@@ -107,6 +110,39 @@ Deno.serve(async (req: Request) => {
     });
   }
 });
+
+async function sendCheckpointPush(
+  supabase: ReturnType<typeof createClient>,
+  participantId: string,
+  carried: number,
+): Promise<void> {
+  const { data: participant } = await supabase
+    .from('acquisition_participants')
+    .select('user_id')
+    .eq('id', participantId)
+    .maybeSingle();
+  if (!participant?.user_id) return;
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('push_token')
+    .eq('id', participant.user_id)
+    .maybeSingle();
+  const pushToken = profile?.push_token;
+  if (!pushToken?.startsWith('ExponentPushToken[')) return;
+
+  await fetch('https://exp.host/--/api/v2/push/send', {
+    method: 'POST',
+    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      to: pushToken,
+      title: `🔒 New 30 days started — ${carried} kept`,
+      body: `Your ${carried} customers carried over. ${76 - carried} more to qualify as a NumVault Lead.`,
+      data: { type: 'qualification_rollover', participant_id: participantId, carried },
+      sound: 'default',
+      priority: 'high',
+    }),
+  });
+}
 
 async function sendAdminPush(
   supabase: ReturnType<typeof createClient>,
