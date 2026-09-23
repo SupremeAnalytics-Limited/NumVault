@@ -27,8 +27,7 @@
         "backgroundColor": "#0D1117"
       },
       "edgeToEdgeEnabled": true,
-      "package": "ng.numvault.app",
-      "versionCode": 20
+      "package": "cloud.numvault.app"
     },
     "web": {
       "bundler": "metro",
