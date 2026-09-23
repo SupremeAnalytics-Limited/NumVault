@@ -49,16 +49,16 @@ const LANDING_STEPS = [
 ];
 
 const QUAL_RULES = [
-  "Refer 76 paying customers within 30 days. This stage is unpaid.",
+  "Refer 76 validated customers within 30 days. This stage is unpaid.",
   "Go at your own pace. No daily targets.",
   "Your progress is saved every 19 customers (19, 38, 57). If your 30 days run out, you keep your last checkpoint and a new 30 days starts automatically.",
   "Below 19 when your 30 days run out? Your count resets to 0 and you can re-enroll.",
 ];
 
 const PAID_RULES = [
-  "You earn for every paying customer you refer, whether it is 1 or 76.",
+  "You earn for every validated customer you refer, whether it is 1 or 76.",
   "At 38 customers a half payout (₦50,000) goes under review. At 76, the second half (₦50,000) goes under review and your next month starts immediately. Every payout is checked before it is sent.",
-  "Didn't hit 76 this month? You still get paid for every customer you brought in. Re-qualify to start again.",
+  "Didn't hit 76 this month? You still get paid for every validated customer. Re-qualify to start again.",
 ];
 
 // ── Payout status display ────────────────────────────────────────────────────
@@ -365,10 +365,10 @@ export default function AcquisitionProgramScreen() {
         'Your progress is saved every 19 customers: 19, 38 and 57. If your 30 days end before you reach 76, you keep your last checkpoint and a new 30 days starts automatically. Below 19, your count goes back to 0.');
     } else if (qualCount >= cp) {
       showAlert(`🔒 ${cp} saved`,
-        `You've brought ${cp} paying customers. If your 30 days end before you reach 76, you keep these ${cp} and a new 30 days starts automatically.`);
+        `You have ${cp} validated customers. If your 30 days end before you reach 76, you keep these ${cp} and a new 30 days starts automatically.`);
     } else {
       showAlert(`${cp}: not reached yet`,
-        `Bring ${cp - qualCount} more customer${cp - qualCount === 1 ? '' : 's'} to lock in ${cp}. Checkpoints save your progress at 19, 38 and 57.`);
+        `${cp - qualCount} more validated customer${cp - qualCount === 1 ? '' : 's'} to lock in ${cp}. Checkpoints save your progress at 19, 38 and 57.`);
     }
   };
 
@@ -709,7 +709,7 @@ export default function AcquisitionProgramScreen() {
                       {reqOpen ? (
                         <View style={styles.scardBody}>
                           <Text style={styles.reqIntro}>
-                            You have <Text style={{ color: '#fff', fontWeight: '600' }}>30 days</Text> to refer 76 paying customers.{' '}
+                            You have <Text style={{ color: '#fff', fontWeight: '600' }}>30 days</Text> to refer 76 validated customers.{' '}
                             <Text style={{ color: GREEN, fontWeight: '600' }}>{qualCount}/76</Text> done —{' '}
                             <Text style={{ color: MUTED }}>{Math.max(0, 76 - qualCount)} to go.</Text>
                           </Text>

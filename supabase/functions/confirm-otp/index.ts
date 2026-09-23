@@ -357,7 +357,7 @@ async function sendReferralPushNotification(
       body = 'You reached 76 customers. Your next 30-day month starts now.';
     } else if (newCount === 19 || newCount === 38 || newCount === 57) {
       title = `🔒 Checkpoint reached: ${newCount} saved!`;
-      body = `Even if your 30 days run out, you keep these ${newCount}. ${76 - newCount} more to qualify as a NumVault Lead.`;
+      body = `Even if your 30 days run out, you keep these ${newCount} validated customers. ${76 - newCount} more to qualify as a NumVault Lead.`;
     } else if (newCount >= 70) {
       title = `🔥 Almost there! ${newCount}/76`;
       body = `Only ${76 - newCount} more validated customers to qualify.`;

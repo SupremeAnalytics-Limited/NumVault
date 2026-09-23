@@ -136,7 +136,7 @@ async function sendCheckpointPush(
     body: JSON.stringify({
       to: pushToken,
       title: `🔒 New 30 days started — ${carried} kept`,
-      body: `Your ${carried} customers carried over. ${76 - carried} more to qualify as a NumVault Lead.`,
+      body: `Your ${carried} validated customers carried over. ${76 - carried} more to qualify as a NumVault Lead.`,
       data: { type: 'qualification_rollover', participant_id: participantId, carried },
       sound: 'default',
       priority: 'high',
