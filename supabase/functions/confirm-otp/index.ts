@@ -115,6 +115,7 @@ Deno.serve(async (req: Request) => {
       payout_h1_id?: string;
       payout_h2_id?: string;
       new_status?: string;
+      block_number?: number;
     };
 
     // Only return otp when DB function confirms completion.
@@ -136,6 +137,7 @@ Deno.serve(async (req: Request) => {
     if (result.counted && result.participant_id && result.new_count !== undefined) {
       const newCount = result.new_count;
       const newStatus = result.new_status;
+      const block = Number(result.block_number ?? 0);
 
       // Referral push to participant
       notifyPromises.push(
@@ -144,11 +146,12 @@ Deno.serve(async (req: Request) => {
           result.participant_id,
           newCount,
           newStatus ?? null,
+          block,
         ).catch((e) => console.warn('Participant push error:', e)),
       );
 
-      // At 76 (qualification complete → active_lead): admin push
-      if (newCount >= 76 || newStatus === 'active_lead') {
+      // Qualification complete (customer 76 of the unpaid stage): admin push
+      if (block === 0 && newCount >= 76) {
         notifyPromises.push(
           notifyAdmin(
             supabaseAdmin, result.participant_id,
@@ -308,62 +311,52 @@ async function sendParticipantPush(
 }
 
 // ── Referral push to participant (count-based messaging) ─────────────────────
-// Distinguishes between qualification wording and paid-block wording.
+// block 0 = unpaid qualification, N = paid month N.
 
 async function sendReferralPushNotification(
   supabase: ReturnType<typeof createClient>,
   participantId: string,
   newCount: number,
   newStatus: string | null,
+  block: number,
 ): Promise<void> {
-  // Determine whether the participant is in a paid month or still qualifying.
-  // Re-fetch the current participant record for the most accurate status.
-  const { data: participant } = await supabase
-    .from('acquisition_participants')
-    .select('status, paid_periods_completed')
-    .eq('id', participantId)
-    .maybeSingle();
-
-  // Use newStatus if the DB function just changed it; otherwise use persisted status.
-  const effectiveStatus = newStatus ?? participant?.status ?? 'qualifying';
-  const blockNum = (participant?.paid_periods_completed ?? 0) + 1;
-
+  const left = 76 - newCount;
+  const more = (noun: string) => `${left} more ${noun}${left === 1 ? '' : 's'}`;
   let title: string;
   let body: string;
 
-  if (effectiveStatus === 'active_lead' && (newCount >= 76 || newStatus === 'active_lead')) {
-    // This customer was the 76th that triggered qualification → transition to active_lead
-    title = '🏆 76 customers reached!';
-    body = 'You reached 76 customers. Your next 30-day month starts now.';
-  } else if (effectiveStatus === 'active_lead') {
-    // Already an active lead — count increments inside a paid month
-    if (newCount >= 76) {
-      title = '🏆 76 customers reached!';
-      body = 'You reached 76 customers. Your next 30-day month starts now.';
+  if (block > 0) {
+    // Paid month
+    if (newCount >= 76 && newStatus === 'contract_complete') {
+      title = '🏆 Month 6 complete!';
+      body = 'You reached 76 validated customers in Month 6. Your 6-month contract is complete. Thank you!';
+    } else if (newCount >= 76) {
+      title = `🏆 Month ${block} complete!`;
+      body = `You reached 76 validated customers in Month ${block}. Month ${block + 1} starts now.`;
     } else if (newCount === 38) {
-      title = `✅ Half of Month ${blockNum} complete!`;
-      body = `38 customers confirmed for Month ${blockNum}. Half 1 (₦50,000) is now under review. Keep going!`;
+      title = `✅ Half of Month ${block} complete!`;
+      body = `38 validated customers for Month ${block}. Half 1 (₦50,000) is now under review. Keep going!`;
     } else if (newCount >= 70) {
-      title = `🔥 Almost done — ${newCount}/76 in Month ${blockNum}`;
-      body = `Only ${76 - newCount} more customers to complete this month.`;
+      title = `🔥 Almost done — ${newCount}/76 in Month ${block}`;
+      body = `Only ${more('validated customer')} to complete this month.`;
     } else {
       title = '🎉 New referral confirmed!';
-      body = `Customer #${newCount} validated for Month ${blockNum}. ${76 - newCount} more to complete this month.`;
+      body = `Customer #${newCount} validated for Month ${block}. ${more('validated customer')} to complete this month.`;
     }
   } else {
     // Qualifying stage
     if (newCount >= 76) {
       title = '🏆 76 customers reached!';
-      body = 'You reached 76 customers. Your next 30-day month starts now.';
+      body = 'You are now a Customer Acquisition Lead for the company. Month 1 starts now.';
     } else if (newCount === 19 || newCount === 38 || newCount === 57) {
       title = `🔒 Checkpoint reached: ${newCount} saved!`;
-      body = `Even if your 30 days run out, you keep these ${newCount} validated customers. ${76 - newCount} more to qualify as a NumVault Lead.`;
+      body = `Even if your 30 days run out, you keep these ${newCount} validated customers. ${left} more to qualify as a NumVault Lead.`;
     } else if (newCount >= 70) {
       title = `🔥 Almost there! ${newCount}/76`;
-      body = `Only ${76 - newCount} more validated customers to qualify.`;
+      body = `Only ${more('validated customer')} to qualify.`;
     } else {
       title = '🎉 New referral confirmed!';
-      body = `Customer #${newCount} validated. ${76 - newCount} more to qualify.`;
+      body = `Customer #${newCount} validated. ${left} more to qualify.`;
     }
   }
 
