@@ -261,7 +261,7 @@ export default function AcquisitionProgramScreen() {
   };
 
   const handleEnroll = async () => {
-    if (!enrollName.trim()) { showAlert('Name required', 'Please enter your full name to enroll.'); return; }
+    if (!enrollName.trim()) { showAlert('Nickname required', 'Please enter a referral nickname to accept the offer.'); return; }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setEnrolling(true);
     try {
@@ -511,43 +511,69 @@ export default function AcquisitionProgramScreen() {
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             <View style={styles.heroCard}>
               <View style={styles.heroIcon}>
-                <MaterialIcons name="person-add" size={32} color={GREEN} />
+                <MaterialIcons name="work" size={32} color={GREEN} />
               </View>
-              <Text style={styles.heroTitle}>Enroll in the Program</Text>
+              <Text style={styles.heroTitle}>We're Hiring Acquisition Staffs</Text>
               <Text style={styles.heroSub}>
-                Your enrollment starts a 30-day qualification window. Acquire 76 validated customers to become an active NumVault Lead.
+                NumVault is a cloud service company that helps Africans get US phone numbers. We're hiring independent acquisition staffs to drive customer growth.
               </Text>
             </View>
 
-            <View style={styles.formCard}>
-              <Text style={styles.formLabel}>Your Full Name</Text>
-              <TextInput
-                style={styles.formInput}
-                value={enrollName}
-                onChangeText={setEnrollName}
-                placeholder="Enter your full name"
-                placeholderTextColor="#3a6a3a"
-                autoCapitalize="words"
-                returnKeyType="done"
-              />
-              <Text style={styles.formHint}>This name appears on your participant record and payout documents.</Text>
-            </View>
+            {[
+              {
+                title: 'Your 30-Day Qualification',
+                body: "Acquire 76 validated customers within 30 days to activate your staff account. Hit the target and you're live.",
+              },
+              {
+                title: "What Happens When You're Active",
+                body: 'You earn ₦100,000 a month for hitting targets. The total offer runs for six months, earning you ₦600,000.',
+              },
+              {
+                title: 'What Works',
+                body: "Based on our transaction data, the highest-converting entry point is meeting people in person and showing them how they can get a US number. That's where the momentum is.",
+              },
+            ].map((sec) => (
+              <View key={sec.title} style={styles.ruleCard}>
+                <Text style={styles.ruleTitle}>{sec.title}</Text>
+                <Text style={styles.ruleText}>{sec.body}</Text>
+              </View>
+            ))}
 
             <View style={styles.ruleCard}>
-              <Text style={styles.ruleTitle}>Before you enroll</Text>
+              <Text style={styles.ruleTitle}>The Requirements</Text>
               {[
-                'The first 76 customers are an unpaid qualification stage.',
-                'You have 30 days to reach 76 validated customers.',
-                'Progress is saved every 19 customers (19, 38, 57) if your 30 days run out.',
-                'Referral clicks and signups alone do not count.',
-                'Each customer must successfully purchase at least one number.',
-                'At 76 customers you automatically become an active lead — no review needed.',
+                'First 76 customers are your qualification phase',
+                'You have 30 days from start date',
+                'Progress checkpoints at 19, 38, and 57 customers',
+                "Clicks and signups don't count—each customer must complete at least one purchase",
+                'At 76 customers, you automatically become active',
               ].map((r, i) => (
                 <View key={i} style={styles.ruleRow}>
                   <View style={styles.ruleDot} />
                   <Text style={styles.ruleText}>{r}</Text>
                 </View>
               ))}
+            </View>
+
+            <View style={styles.ruleCard}>
+              <Text style={styles.ruleTitle}>Limited Capacity</Text>
+              <Text style={styles.ruleText}>
+                We're hiring a limited number of acquisition staffs. When we hit capacity, this position closes.
+              </Text>
+            </View>
+
+            <View style={styles.formCard}>
+              <Text style={styles.formLabel}>Your Referral Nickname</Text>
+              <TextInput
+                style={styles.formInput}
+                value={enrollName}
+                onChangeText={setEnrollName}
+                placeholder="Enter a nickname"
+                placeholderTextColor="#3a6a3a"
+                autoCapitalize="words"
+                returnKeyType="done"
+              />
+              <Text style={styles.formHint}>Your referral code is made from this nickname.</Text>
             </View>
 
             <TouchableOpacity
@@ -557,7 +583,7 @@ export default function AcquisitionProgramScreen() {
               activeOpacity={0.85}
             >
               {enrolling ? <ActivityIndicator color="#061006" /> : (
-                <Text style={styles.ctaBtnText}>Start My 30-Day Qualification</Text>
+                <Text style={styles.ctaBtnText}>Accept Job Offer</Text>
               )}
             </TouchableOpacity>
 
