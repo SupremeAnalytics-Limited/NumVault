@@ -373,8 +373,8 @@ export default function HomeScreen() {
             <View style={styles.loadingContainer}>
               <View style={styles.loadingCard}>
                 <ActivityIndicator color={Colors.primary} size="large" />
-                <Text style={styles.loadingTitle}>Loading services...</Text>
-                <Text style={styles.loadingSubtitle}>Fetching service list from Server B</Text>
+                <Text style={styles.loadingTitle}>Loading apps…</Text>
+                <Text style={styles.loadingSubtitle}>Getting the latest prices for you</Text>
               </View>
             </View>
           ) : (
