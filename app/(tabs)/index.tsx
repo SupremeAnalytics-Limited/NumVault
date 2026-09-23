@@ -307,7 +307,7 @@ export default function HomeScreen() {
   const sheetTitle = sheetService
     ? sheetService.title
     : sheetPackage ? `${sheetPackage.pkg.project_name} — ${sheetPackage.country.title}` : '';
-  const sheetProvider = sheetService ? 'Server B' : 'Server A';
+  const sheetProvider = 'NumVault Cloud';
   const sheetCat = sheetService ? sheetService.category : null;
   const isSheetOpen = !!(sheetService || sheetPackage);
 

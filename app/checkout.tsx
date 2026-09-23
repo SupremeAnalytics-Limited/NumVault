@@ -268,7 +268,7 @@ export default function CheckoutScreen() {
               <Text style={styles.platformSub}>{params.country_name} · SMS Verification</Text>
             </View>
             <View style={styles.providerTag}>
-              <Text style={styles.providerTagText}>Server B</Text>
+              <Text style={styles.providerTagText}>NumVault Cloud</Text>
             </View>
           </View>
 
