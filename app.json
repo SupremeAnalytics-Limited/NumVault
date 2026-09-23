@@ -58,7 +58,18 @@
           "icon": "./assets/images/icon.png",
           "color": "#00C853"
         }
-      ]
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0"
+          }
+        }
+      ],
+      "./plugins/suppressCompileSdkWarning"
     ],
     "experiments": {
       "typedRoutes": true
