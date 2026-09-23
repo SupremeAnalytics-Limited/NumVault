@@ -374,7 +374,6 @@ export default function HomeScreen() {
               <View style={styles.loadingCard}>
                 <ActivityIndicator color={Colors.primary} size="large" />
                 <Text style={styles.loadingTitle}>Loading apps…</Text>
-                <Text style={styles.loadingSubtitle}>Getting the latest prices for you</Text>
               </View>
             </View>
           ) : (
