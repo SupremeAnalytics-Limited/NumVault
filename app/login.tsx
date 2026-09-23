@@ -66,7 +66,7 @@ export default function LoginScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       trackSignupOtpSent(true);
       setOtpSent(true);
-      showAlert('Code Sent', 'Check your email for the 4-digit verification code.');
+      showAlert('Code Sent', 'Check your email for the 6-digit verification code.');
     }
   };
 
@@ -159,7 +159,7 @@ export default function LoginScreen() {
     } else {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setForgotOtpSent(true);
-      showAlert('Code Sent', 'Check your email for the 4-digit reset code.');
+      showAlert('Code Sent', 'Check your email for the 6-digit reset code.');
     }
   };
 
@@ -395,7 +395,7 @@ export default function LoginScreen() {
             {mode === 'register' && otpSent && (
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Verification Code</Text>
-                <Text style={styles.otpHint}>Enter the 4-digit code sent to {email}</Text>
+                <Text style={styles.otpHint}>Enter the 6-digit code sent to {email}</Text>
                 <TextInput
                   style={[styles.inputRow, styles.otpInput]}
                   value={otp}
@@ -403,7 +403,7 @@ export default function LoginScreen() {
                   placeholder="0000"
                   placeholderTextColor={Colors.textMuted}
                   keyboardType="number-pad"
-                  maxLength={4}
+                  maxLength={6}
                 />
               </View>
             )}
@@ -427,7 +427,7 @@ export default function LoginScreen() {
               <>
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Verification Code</Text>
-                  <Text style={styles.otpHint}>Enter the 4-digit code sent to {email}</Text>
+                  <Text style={styles.otpHint}>Enter the 6-digit code sent to {email}</Text>
                   <TextInput
                     style={[styles.inputRow, styles.otpInput]}
                     value={otp}
@@ -435,7 +435,7 @@ export default function LoginScreen() {
                     placeholder="0000"
                     placeholderTextColor={Colors.textMuted}
                     keyboardType="number-pad"
-                    maxLength={4}
+                    maxLength={6}
                   />
                 </View>
                 <View style={styles.inputGroup}>
