@@ -19,7 +19,7 @@ const DEMAND_WINDOW_MINUTES = 60;
 const FLAT_ACQUISITION_FEE = 1_500;     // Retail = wholesale + ₦1,500
 const LEAD_MONTHLY_PAY = 100_000;       // ₦100,000 per 76 customers
 const LEAD_MONTHLY_TARGET = 76;
-const MIN_MINUTES_BETWEEN_TOPUPS = 30;  // Skip if a top-up was inserted within this window
+const MIN_MINUTES_BETWEEN_TOPUPS = 5;   // Skip if a top-up was inserted within this window
 const CRITICAL_BALANCE = 15_000;        // ₦15,000 — always alert admin at or below this
 // ─────────────────────────────────────────────────────────────────────────────
 
