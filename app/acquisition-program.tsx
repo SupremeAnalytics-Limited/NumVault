@@ -27,7 +27,13 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type AcqLaunchState = 'first_launch' | 'downgraded' | 'active_staff';
 
-const LANDING_STEPS = [
+const LANDING_STEPS: {
+  label: string;
+  icon: 'schedule' | 'phone-android' | 'emoji-events';
+  title: string;
+  body: string;
+  sections?: { heading: string; text: string }[];
+}[] = [
   {
     label: 'Side income',
     icon: 'schedule' as const,
@@ -41,10 +47,28 @@ const LANDING_STEPS = [
     body: "NumVault gives you a dedicated number for any platform — one that's yours permanently, with no recurring fees. It keeps your personal number private while giving your businesses their own dedicated phone numbers across 2,300+ apps and services. This protects your private contact information from data reselling and spam messages from other platforms.",
   },
   {
-    label: 'Customer Acquisition Lead commitment',
+    label: 'Customer Acquisition Staff commitment',
     icon: 'emoji-events' as const,
-    title: 'Earn your Job Position with our company as a Customer Acquisition Lead',
-    body: 'You are a Brand Ambassador for NumVault. Share your referral code. A referral counts when a new customer signs up with your code and pays for at least one number. Each customer must have a different email address and counts once. Your first 76 customers are an unpaid qualification, and you have 30 days to reach them. Your progress is saved every 19 customers (19, 38 and 57): if your 30 days end first, you keep your last checkpoint and a new 30 days starts. At 76 you are brought on as a Customer Acquisition Lead for the company and your Staff Dashboard opens. Each month, 76 customers earns you ₦100,000, paid in two halves of ₦50,000. You have 30 days for each month, and if you reach 76 sooner your next month starts straight away. The contract is for six months, for up to ₦600,000 in total. Every payout is reviewed before it is sent. We pay by Paystack to Nigerian bank accounts, including Palmpay, Kuda and Opay. No card details. If you want to extend your contract beyond six months, email support@numvault.cloud.',
+    title: 'Earn Your Job Position with our company as a Customer Acquisition Staff',
+    body: '',
+    sections: [
+      {
+        heading: 'The Money',
+        text: 'Earn up to ₦600,000 over six months. Move fast enough and you could earn the full ₦600,000 in one day.',
+      },
+      {
+        heading: 'How We Pay You',
+        text: 'We pay via Paystack to Nigerian bank accounts (Palmpay, Kuda, Opay). No card details needed. 76 customers = ₦100,000. Two ₦50,000 payments: one at 38 customers, one at 76.',
+      },
+      {
+        heading: 'What It Takes',
+        text: 'You share your referral code. A referral counts when a new customer signs up with your code and pays for at least one number. 30 days per month to reach 76. Progress saved at 19, 38, and 57 customers.',
+      },
+      {
+        heading: 'Extend Your Contract',
+        text: "If you earn ₦600,000 in one day—meaning you're that efficient—contact support@numvault.cloud to extend your contract to a full year.",
+      },
+    ],
   },
 ];
 
@@ -444,7 +468,13 @@ export default function AcquisitionProgramScreen() {
                   <Text style={styles.landingStepLabel}>{step.label}</Text>
                 </View>
                 <Text style={styles.landingTitle}>{step.title}</Text>
-                <Text style={styles.landingBody}>{step.body}</Text>
+                {step.body ? <Text style={styles.landingBody}>{step.body}</Text> : null}
+                {step.sections?.map((sec) => (
+                  <View key={sec.heading} style={styles.landingSection}>
+                    <Text style={styles.landingSectionHeading}>{sec.heading}</Text>
+                    <Text style={styles.landingBody}>{sec.text}</Text>
+                  </View>
+                ))}
                 <View style={{ height: 24 }} />
               </ScrollView>
             ))}
@@ -478,7 +508,7 @@ export default function AcquisitionProgramScreen() {
               <Text style={styles.ctaBtnText}>
                 {landingStep < LANDING_STEPS.length - 1
                   ? 'Next'
-                  : participant ? 'View My Progress' : 'Become an Ambassador'}
+                  : participant ? 'View My Progress' : 'Accept Job Offer'}
               </Text>
             </TouchableOpacity>
             {participant ? (
@@ -1257,6 +1287,8 @@ const styles = StyleSheet.create({
   landingStepLabel: { color: GREEN, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
   landingTitle: { color: TEXT, fontSize: 24, fontWeight: '700', lineHeight: 32 },
   landingBody: { color: TEXT2, fontSize: 15, lineHeight: 26 },
+  landingSection: { gap: 6 },
+  landingSectionHeading: { color: TEXT, fontSize: 16, fontWeight: '700' },
   landingFooter: {
     paddingHorizontal: 20, paddingTop: 12, gap: 10,
     borderTopWidth: 1, borderTopColor: BORDER, backgroundColor: BG,
