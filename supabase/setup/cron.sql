@@ -2,15 +2,16 @@
 -- migration, replacing the two placeholders below.
 --
 --   <PROJECT_REF>       e.g. abcdefghijklmnop (from the project URL)
---   <SERVICE_ROLE_KEY>  Project Settings → API → service_role (keep it secret)
+--   <ANON_KEY>          the public anon key the app uses (auto-expire-orders
+--                       has no caller check; the key only passes the JWT gateway)
 --
--- The key is stored in Supabase Vault, not in this file or the repo.
+-- Both values are stored in Supabase Vault.
 
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
 select vault.create_secret('https://<PROJECT_REF>.supabase.co', 'project_url');
-select vault.create_secret('<SERVICE_ROLE_KEY>', 'service_role_key');
+select vault.create_secret('<ANON_KEY>', 'function_key');
 
 -- Every minute: expire orders with no OTP after 5 minutes (refund to wallet),
 -- which also checks the Socially.ng balance and tops it up if needed.
@@ -20,7 +21,7 @@ select cron.schedule('auto-expire-orders', '* * * * *', $$
            || '/functions/v1/auto-expire-orders',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
-      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key')),
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'function_key')),
     body := '{}'::jsonb,
     timeout_milliseconds := 55000);
 $$);
