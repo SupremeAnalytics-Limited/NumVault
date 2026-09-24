@@ -168,6 +168,10 @@ export default function AdminDashboardScreen() {
   const [transferToggleSaving, setTransferToggleSaving] = useState(false);
   const [tourForceEverySession, setTourForceEverySession] = useState(false);
   const [tourToggleSaving, setTourToggleSaving] = useState(false);
+  const [appOnboardingForceEverySession, setAppOnboardingForceEverySession] = useState(true);
+  const [appOnboardingToggleSaving, setAppOnboardingToggleSaving] = useState(false);
+  const [acqLandingForceEverySession, setAcqLandingForceEverySession] = useState(true);
+  const [acqLandingToggleSaving, setAcqLandingToggleSaving] = useState(false);
   const [marginValue, setMarginValue] = useState('1500');
   const [marginDirty, setMarginDirty] = useState(false);
   const [marginSaving, setMarginSaving] = useState(false);
@@ -179,11 +183,13 @@ export default function AdminDashboardScreen() {
   const loadSettings = useCallback(async () => {
     setJobAdLoading(true);
     try {
-      const [enabled, steps, margin, tourForce] = await Promise.all([
+      const [enabled, steps, margin, tourForce, appOnboardingForce, acqLandingForce] = await Promise.all([
         getSetting<boolean>('near_instant_transfer_enabled', false),
         getSetting<JobAdStep[] | null>('job_ad_content', null),
         getSetting<number>('flat_acquisition_fee', 1500),
         getSetting<boolean>('dashboard_tour_force_every_session', false),
+        getSetting<boolean>('app_onboarding_force_every_session', true),
+        getSetting<boolean>('acquisition_landing_force_every_session', true),
       ]);
       setNearInstantTransfer(!!enabled);
       setJobAdSteps(steps ?? DEFAULT_JOB_AD_STEPS);
@@ -191,6 +197,8 @@ export default function AdminDashboardScreen() {
       setMarginValue(String(margin));
       setMarginDirty(false);
       setTourForceEverySession(!!tourForce);
+      setAppOnboardingForceEverySession(!!appOnboardingForce);
+      setAcqLandingForceEverySession(!!acqLandingForce);
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -228,6 +236,36 @@ export default function AdminDashboardScreen() {
       showAlert('Could not save', e.message || 'Failed to update the tour setting.');
     } finally {
       setTourToggleSaving(false);
+    }
+  };
+
+  const toggleAppOnboardingForceEverySession = async (value: boolean) => {
+    setAppOnboardingToggleSaving(true);
+    const previous = appOnboardingForceEverySession;
+    setAppOnboardingForceEverySession(value); // optimistic
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('app_onboarding_force_every_session', value);
+    } catch (e: any) {
+      setAppOnboardingForceEverySession(previous);
+      showAlert('Could not save', e.message || 'Failed to update the onboarding setting.');
+    } finally {
+      setAppOnboardingToggleSaving(false);
+    }
+  };
+
+  const toggleAcqLandingForceEverySession = async (value: boolean) => {
+    setAcqLandingToggleSaving(true);
+    const previous = acqLandingForceEverySession;
+    setAcqLandingForceEverySession(value); // optimistic
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('acquisition_landing_force_every_session', value);
+    } catch (e: any) {
+      setAcqLandingForceEverySession(previous);
+      showAlert('Could not save', e.message || 'Failed to update the job pitch setting.');
+    } finally {
+      setAcqLandingToggleSaving(false);
     }
   };
 
@@ -1043,6 +1081,58 @@ export default function AdminDashboardScreen() {
               </View>
               <Text style={settingsStyles.hint}>
                 Takes effect immediately — no app update needed. Turn it off to go back to showing it just once per user.
+              </Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>App intro on every launch</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {appOnboardingForceEverySession
+                      ? 'ON — the 3-slide app intro shows every time the app is opened, for everyone.'
+                      : 'OFF — the app intro shows only once ever, on first launch on each device.'}
+                  </Text>
+                </View>
+                {appOnboardingToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={appOnboardingForceEverySession}
+                    onValueChange={toggleAppOnboardingForceEverySession}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={appOnboardingForceEverySession ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.hint}>
+                Takes effect immediately — no app update needed.
+              </Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Job pitch on every visit</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {acqLandingForceEverySession
+                      ? 'ON — the acquisition program pitch screens show every time someone opens that screen.'
+                      : 'OFF — the pitch screens show only once ever per user; returning visitors go straight to their dashboard or the enrollment form.'}
+                  </Text>
+                </View>
+                {acqLandingToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={acqLandingForceEverySession}
+                    onValueChange={toggleAcqLandingForceEverySession}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={acqLandingForceEverySession ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.hint}>
+                Takes effect immediately — no app update needed. The job text itself is still edited below.
               </Text>
             </View>
 

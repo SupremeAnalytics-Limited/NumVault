@@ -47,3 +47,8 @@ export const PLATFORM_ICONS: Record<string, string> = {
 
 export const OTP_POLL_INTERVAL = 5000;  // 5 seconds
 export const OTP_TIMEOUT = 300000;      // 5 minutes — matches Socially.ng OTP delivery window
+
+// AsyncStorage key marking the 3-slide app intro (app/onboarding.tsx) as seen
+// on this device. Only consulted when the admin toggle
+// app_onboarding_force_every_session is off — otherwise it always shows.
+export const APP_ONBOARDING_SEEN_KEY = 'app_onboarding_seen_v1';

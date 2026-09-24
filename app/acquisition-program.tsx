@@ -207,6 +207,36 @@ export default function AcquisitionProgramScreen() {
     setAcqLaunchState(isActive ? 'active_staff' : isDowngraded ? 'downgraded' : 'first_launch');
   }, []);
 
+  // Whether the job-ad pitch (the 'landing' screen) shows every time this
+  // screen opens or only once ever per user is controlled by the admin
+  // toggle acquisition_landing_force_every_session (defaults to true —
+  // every time, matching this screen's original always-show behavior).
+  const acqLandingSeenKey = async () => {
+    const supabase = (await import('@/template')).getSupabaseClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    return user?.id ? `acq_landing_seen_${user.id}` : null;
+  };
+
+  const enterLandingOrSkip = async (dest: Screen) => {
+    try {
+      const forceEverySession = await getSetting<boolean>('acquisition_landing_force_every_session', true);
+      if (forceEverySession) { setScreen('landing'); return; }
+      const key = await acqLandingSeenKey();
+      if (!key) { setScreen('landing'); return; }
+      const seen = await AsyncStorage.getItem(key);
+      setScreen(seen ? dest : 'landing');
+    } catch {
+      setScreen('landing');
+    }
+  };
+
+  const markLandingSeen = async () => {
+    try {
+      const key = await acqLandingSeenKey();
+      if (key) await AsyncStorage.setItem(key, '1');
+    } catch { /* non-fatal */ }
+  };
+
   const loadAll = async () => {
     try {
       setLoading(true);
@@ -235,11 +265,11 @@ export default function AcquisitionProgramScreen() {
         const [refs, pays] = await Promise.all([getMyReferredCustomers(p.id), getMyPayouts(p.id)]);
         setReferred(refs);
         setPayouts(pays as LeadPayout[]);
-        setScreen('landing');
+        await enterLandingOrSkip('dashboard');
       } else {
         resolveAcqLaunchState(null);
         setDestinationScreen('enroll');
-        setScreen('landing');
+        await enterLandingOrSkip('enroll');
       }
     } catch (e) {
       console.error('AcquisitionProgram load error', e);
@@ -589,6 +619,7 @@ export default function AcquisitionProgramScreen() {
                   landingScrollRef.current?.scrollTo({ x: next * SCREEN_WIDTH, animated: true });
                   setLandingStep(next);
                 } else {
+                  markLandingSeen();
                   // If active_lead and no bank details, show bank onboarding
                   if (needsBankDetails) {
                     setScreen('bank_onboarding');
@@ -609,6 +640,7 @@ export default function AcquisitionProgramScreen() {
               <TouchableOpacity style={styles.backLink}
                 onPress={async () => {
                   await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  markLandingSeen();
                   if (needsBankDetails) setScreen('bank_onboarding');
                   else setScreen('dashboard');
                 }}>
