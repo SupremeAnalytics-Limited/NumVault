@@ -373,7 +373,7 @@ export default function HomeScreen() {
             <View style={styles.loadingContainer}>
               <View style={styles.loadingCard}>
                 <ActivityIndicator color={Colors.primary} size="large" />
-                <Text style={styles.loadingTitle}>Connecting to NumVault Cloud</Text>
+                <Text style={styles.loadingTitle}>NumVault.Cloud</Text>
               </View>
             </View>
           ) : (
