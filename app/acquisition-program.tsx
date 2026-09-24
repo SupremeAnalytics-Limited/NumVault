@@ -9,7 +9,9 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAlert } from '@/template';
+import DashboardTour, { TourStep } from '@/components/DashboardTour';
 import {
   AcquisitionParticipant, ReferredCustomer, PitchItem, LeadPayout,
   getMyParticipant, enrollInProgram, reEnrollInProgram,
@@ -144,6 +146,15 @@ export default function AcquisitionProgramScreen() {
   const [pitchOpen, setPitchOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const welcomeOpacity = useRef(new Animated.Value(0)).current;
+
+  // First-visit dashboard tour — one compulsory walkthrough of what the
+  // cards mean, gated per-user so it doesn't repeat on later visits.
+  const [showTour, setShowTour] = useState(false);
+  const dashboardScrollRef = useRef<ScrollView>(null);
+  const topCardRef = useRef<View>(null);
+  const cpCardRef = useRef<View>(null);
+  const challengeCardRef = useRef<View>(null);
+  const refCardRef = useRef<View>(null);
 
   // Bank onboarding
   const [bankAccountNumber, setBankAccountNumber] = useState('');
@@ -385,6 +396,55 @@ export default function AcquisitionProgramScreen() {
   useEffect(() => {
     if (isQualified) setDashTab('onteam');
   }, [isQualified]);
+
+  // First-visit compulsory dashboard tour — only on the 'proving' tab, once
+  // a participant exists and the dashboard is actually showing. Gated per
+  // user id so it never repeats after they've clicked through it once.
+  useEffect(() => {
+    if (screen !== 'dashboard' || dashTab !== 'proving' || !participant) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const key = `acq_dashboard_tour_seen_${participant.user_id}`;
+        const seen = await AsyncStorage.getItem(key);
+        if (!seen && !cancelled) {
+          // Let the cards finish laying out before measuring them.
+          setTimeout(() => { if (!cancelled) setShowTour(true); }, 500);
+        }
+      } catch { /* if storage fails, just skip the tour rather than block anything */ }
+    })();
+    return () => { cancelled = true; };
+  }, [screen, dashTab, participant?.id]);
+
+  const finishTour = async () => {
+    setShowTour(false);
+    if (participant) {
+      try { await AsyncStorage.setItem(`acq_dashboard_tour_seen_${participant.user_id}`, '1'); } catch { /* non-fatal */ }
+    }
+  };
+
+  const TOUR_STEPS: TourStep[] = [
+    {
+      ref: topCardRef,
+      title: 'Your progress at a glance',
+      body: "This card is your summary: how much you can earn (₦600,000 over 6 months), how many validated customers you've referred so far out of 76, and how much time is left in your current 30-day window.",
+    },
+    {
+      ref: cpCardRef,
+      title: 'Checkpoints save your place',
+      body: 'Every 19 customers (19, 38, 57) your progress is locked in. If your 30 days run out before you reach 76, you keep your last checkpoint instead of losing everything — a new 30 days starts automatically from there.',
+    },
+    {
+      ref: challengeCardRef,
+      title: 'What counts as a referral',
+      body: 'Tap this card to see the rules in full. In short: someone has to sign up with your code AND buy at least one number for it to count — just signing up is not enough.',
+    },
+    {
+      ref: refCardRef,
+      title: 'Your referral code',
+      body: 'This is what you actually share. Copy it or use the share button to send it to people — every validated customer who used your code counts toward your 76.',
+    },
+  ];
 
   // For qualifying tab: daysLeft is from qualification_start_date
   // For active_lead tab: daysLeft is from paid_period_start_date
@@ -652,7 +712,7 @@ export default function AcquisitionProgramScreen() {
                 </TouchableOpacity>
               </View>
             ) : (
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 40 }}>
+              <ScrollView ref={dashboardScrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 40 }}>
 
                 {/* ── UNDER REVIEW BANNER ── */}
                 {dashTab === 'onteam' && underReviewPayouts.length > 0 ? (
@@ -667,7 +727,7 @@ export default function AcquisitionProgramScreen() {
                 {/* ── PROVING YOURSELF tab ── */}
                 {dashTab === 'proving' && (
                   <>
-                    <View style={styles.topCard}>
+                    <View style={styles.topCard} ref={topCardRef}>
                       <View style={styles.topCardTop}>
                         <View style={styles.topCardLeft}>
                           <Text style={styles.topCardLabel}>Your proving ground</Text>
@@ -707,7 +767,7 @@ export default function AcquisitionProgramScreen() {
                       </View>
                     </View>
 
-                    <View style={styles.cpCard}>
+                    <View style={styles.cpCard} ref={cpCardRef}>
                       <View style={styles.cpHdr}>
                         <Text style={styles.cpTitle}>
                           Checkpoints{'  '}
@@ -725,7 +785,7 @@ export default function AcquisitionProgramScreen() {
                       ) : null}
                     </View>
 
-                    <View style={styles.scard}>
+                    <View style={styles.scard} ref={challengeCardRef}>
                       <TouchableOpacity style={styles.scardHdr}
                         onPress={async () => { await Haptics.selectionAsync(); setReqOpen(!reqOpen); }}
                         activeOpacity={0.8}>
@@ -927,7 +987,7 @@ export default function AcquisitionProgramScreen() {
                 </View>
 
                 {/* Referral card */}
-                <View style={styles.refCard}>
+                <View style={styles.refCard} ref={refCardRef}>
                   <View style={styles.refTop}>
                     <View style={styles.refIcon}>
                       <MaterialIcons name="link" size={16} color={GREEN} />
@@ -1169,6 +1229,13 @@ export default function AcquisitionProgramScreen() {
           </Modal>
         </KeyboardAvoidingView>
       )}
+
+      <DashboardTour
+        visible={showTour}
+        steps={TOUR_STEPS}
+        scrollViewRef={dashboardScrollRef}
+        onComplete={finishTour}
+      />
     </View>
   );
 }
