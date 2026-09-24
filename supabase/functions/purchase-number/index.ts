@@ -128,6 +128,18 @@ Deno.serve(async (req: Request) => {
       });
     }
     // ── END PRICE VALIDATION ─────────────────────────────────────────────────
+
+    // ── Required amount: server-authoritative, never client-trusted ─────────
+    // expectedRetail already guarantees the ₦1,500 margin (wholesale + flat
+    // fee, verified above). When near_instant_transfer_enabled is on, the
+    // customer also covers the exact Paystack transfer fee for sending
+    // wholesale to Socially.ng — added here, not absorbed out of margin.
+    // This is the one number both paths below are checked/charged against;
+    // client-sent amount_paid is never trusted as the actual price.
+    const nearInstantTransferEnabled = await getSetting(supabaseAdmin, 'near_instant_transfer_enabled', false);
+    const requiredAmount = expectedRetail! + (nearInstantTransferEnabled ? paystackTransferFee(wholesaleCost!) : 0);
+    // ──────────────────────────────────────────────────────────────────────
+
     if (!use_wallet && !paystack_reference) {
       return new Response(JSON.stringify({ error: 'Provide paystack_reference or set use_wallet: true' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -185,12 +197,14 @@ Deno.serve(async (req: Request) => {
 
     if (use_wallet) {
       // ── WALLET PATH ──────────────────────────────────────────────────────────
-      paidAmount = Number(amount_paid);
-      if (!paidAmount || paidAmount <= 0) {
-        return new Response(JSON.stringify({ error: 'Invalid amount_paid for wallet purchase' }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400,
-        });
+      // paidAmount is the server-computed requiredAmount, not the client-sent
+      // amount_paid — the wallet debit must always be exactly wholesale +
+      // ₦1,500 margin (+ transfer fee when applicable), never whatever the
+      // client happens to send. A large mismatch is logged as a signal of a
+      // stale/buggy client, but the server number is what's actually charged.
+      paidAmount = requiredAmount;
+      if (Number(amount_paid) && Math.abs(Number(amount_paid) - paidAmount) > 50) {
+        console.warn(`Wallet purchase: client sent amount_paid=₦${amount_paid}, server charged requiredAmount=₦${paidAmount} (ignoring client value)`);
       }
 
       const { data: newBalanceRow, error: debitRpcErr } = await supabaseAdmin
@@ -279,11 +293,12 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Both Paystack routes: the amount actually paid must cover the price.
-      if (paidAmount < expectedRetail - 50) {
-        console.warn(`Paystack ref ${paystack_reference} underpaid: paid ₦${paidAmount}, price ₦${expectedRetail}`);
+      // Both Paystack routes: the amount actually paid must cover the price,
+      // margin and (when applicable) transfer fee included — see requiredAmount above.
+      if (paidAmount < requiredAmount - 50) {
+        console.warn(`Paystack ref ${paystack_reference} underpaid: paid ₦${paidAmount}, required ₦${requiredAmount}`);
         return new Response(JSON.stringify({
-          error: `Payment of ₦${paidAmount.toLocaleString()} does not cover the price of ₦${expectedRetail.toLocaleString()}. Please contact support.`,
+          error: `Payment of ₦${paidAmount.toLocaleString()} does not cover the price of ₦${requiredAmount.toLocaleString()}. Please contact support.`,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 402,
@@ -475,7 +490,6 @@ Deno.serve(async (req: Request) => {
     // failure only logs, it never fails a sale the customer already received.
     // The order above is already committed either way.
     if (wholesaleCost != null && wholesaleCost > 0) {
-      const nearInstantTransferEnabled = await getSetting(supabaseAdmin, 'near_instant_transfer_enabled', false);
       if (nearInstantTransferEnabled) {
         try {
           const secretKey = Deno.env.get('PAYSTACK_SECRET_KEY') ?? '';
