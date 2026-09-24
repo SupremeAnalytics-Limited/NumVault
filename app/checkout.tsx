@@ -304,14 +304,8 @@ export default function CheckoutScreen() {
           <View style={styles.priceSection}>
             <View style={styles.priceRow}>
               <Text style={styles.priceRowLabel}>Service fee</Text>
-              <Text style={styles.priceRowValue}>₦{basePrice.toLocaleString()}</Text>
+              <Text style={styles.priceRowValue}>₦{price.toLocaleString()}</Text>
             </View>
-            {transferFeeAddon > 0 ? (
-              <View style={styles.priceRow}>
-                <Text style={styles.priceRowLabel}>Transfer fee</Text>
-                <Text style={styles.priceRowValue}>₦{transferFeeAddon.toLocaleString()}</Text>
-              </View>
-            ) : null}
             {balanceReady && !canPayFromWallet ? (
               <>
                 <View style={styles.priceRow}>

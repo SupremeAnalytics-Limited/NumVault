@@ -166,6 +166,9 @@ export default function AdminDashboardScreen() {
   // ── Settings tab ──────────────────────────────────────────────────────────
   const [nearInstantTransfer, setNearInstantTransfer] = useState(false);
   const [transferToggleSaving, setTransferToggleSaving] = useState(false);
+  const [marginValue, setMarginValue] = useState('1500');
+  const [marginDirty, setMarginDirty] = useState(false);
+  const [marginSaving, setMarginSaving] = useState(false);
   const [jobAdSteps, setJobAdSteps] = useState<JobAdStep[] | null>(null);
   const [jobAdLoading, setJobAdLoading] = useState(false);
   const [jobAdSaving, setJobAdSaving] = useState(false);
@@ -174,13 +177,16 @@ export default function AdminDashboardScreen() {
   const loadSettings = useCallback(async () => {
     setJobAdLoading(true);
     try {
-      const [enabled, steps] = await Promise.all([
+      const [enabled, steps, margin] = await Promise.all([
         getSetting<boolean>('near_instant_transfer_enabled', false),
         getSetting<JobAdStep[] | null>('job_ad_content', null),
+        getSetting<number>('flat_acquisition_fee', 1500),
       ]);
       setNearInstantTransfer(!!enabled);
       setJobAdSteps(steps ?? DEFAULT_JOB_AD_STEPS);
       setJobAdDirty(false);
+      setMarginValue(String(margin));
+      setMarginDirty(false);
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -203,6 +209,26 @@ export default function AdminDashboardScreen() {
       showAlert('Could not save', e.message || 'Failed to update the transfer mode.');
     } finally {
       setTransferToggleSaving(false);
+    }
+  };
+
+  const saveMargin = async () => {
+    const parsed = Number(marginValue);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      showAlert('Invalid amount', 'Enter a margin of ₦0 or more.');
+      return;
+    }
+    setMarginSaving(true);
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('flat_acquisition_fee', parsed);
+      setMarginValue(String(parsed));
+      setMarginDirty(false);
+      showAlert('Saved', `Every number sale now adds ₦${parsed.toLocaleString()} margin — applies immediately, across all providers and services.`);
+    } catch (e: any) {
+      showAlert('Could not save', e.message || 'Failed to update the margin.');
+    } finally {
+      setMarginSaving(false);
     }
   };
 
@@ -976,6 +1002,36 @@ export default function AdminDashboardScreen() {
             </View>
 
             <View style={settingsStyles.card}>
+              <Text style={settingsStyles.cardTitle}>Margin per number sale</Text>
+              <Text style={settingsStyles.cardSub}>
+                Added on top of wholesale cost for every number, across all providers and services. Takes effect immediately on save — no app update needed.
+              </Text>
+              <View style={[settingsStyles.rowBetween, { alignItems: 'center', marginTop: 4 }]}>
+                <View style={settingsStyles.marginInputWrap}>
+                  <Text style={settingsStyles.marginPrefix}>₦</Text>
+                  <TextInput
+                    style={settingsStyles.marginInput}
+                    value={marginValue}
+                    onChangeText={(t) => { setMarginValue(t.replace(/[^0-9.]/g, '')); setMarginDirty(true); }}
+                    keyboardType="numeric"
+                    placeholder="1500"
+                    placeholderTextColor={MUTED}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[settingsStyles.saveBtn, { marginTop: 0, paddingHorizontal: 20 }, (!marginDirty || marginSaving) && settingsStyles.saveBtnDisabled]}
+                  onPress={saveMargin}
+                  disabled={!marginDirty || marginSaving}
+                  activeOpacity={0.85}
+                >
+                  {marginSaving ? <ActivityIndicator color="#061006" /> : (
+                    <Text style={settingsStyles.saveBtnText}>{marginDirty ? 'Save' : 'Saved'}</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={settingsStyles.card}>
               <View style={settingsStyles.rowBetween}>
                 <Text style={settingsStyles.cardTitle}>Job ad text (acquisition-program screen)</Text>
                 <TouchableOpacity onPress={resetJobAdContent} activeOpacity={0.7}>
@@ -1265,6 +1321,13 @@ const settingsStyles = StyleSheet.create({
   cardSub: { fontSize: 12, color: TEXT2, lineHeight: 18 },
   hint: { fontSize: 11, color: MUTED, lineHeight: 16, marginTop: 4 },
   resetLink: { fontSize: 12, color: ORANGE, fontWeight: '600' },
+  marginInputWrap: {
+    flex: 1, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: SURFACE2, borderWidth: 1, borderColor: BORDER2, borderRadius: 10,
+    paddingHorizontal: 12,
+  },
+  marginPrefix: { color: GREEN, fontSize: 16, fontWeight: '700', marginRight: 4 },
+  marginInput: { flex: 1, color: TEXT, fontSize: 16, fontWeight: '700', paddingVertical: 10 },
   stepBlock: { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: BORDER, gap: 6 },
   stepLabel: { fontSize: 11, fontWeight: '700', color: GREEN, letterSpacing: 0.5, textTransform: 'uppercase' },
   fieldLabel: { fontSize: 11, color: MUTED, marginTop: 6 },

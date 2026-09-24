@@ -68,8 +68,10 @@ Deno.serve(async (req: Request) => {
     // ── SERVER-SIDE PRICE VALIDATION ─────────────────────────────────────────
     // Fetch the authoritative price from Socially.ng before debiting anything.
     // This prevents clients from sending a manipulated amount_paid value.
-    // Pricing model: customer pays wholesale + ₦1,500 flat fee.
-    const FLAT_ACQUISITION_FEE = 1500; // ₦1,500
+    // Pricing model: customer pays wholesale + a flat margin, admin-editable
+    // from the dashboard (app_settings.flat_acquisition_fee) — applies to
+    // every number sale immediately once saved. Falls back to ₦1,500.
+    const FLAT_ACQUISITION_FEE = await getSetting(supabaseAdmin, 'flat_acquisition_fee', 1500);
     let expectedRetail: number | null = null;
     let wholesaleCost: number | null = null; // captured for the near-instant transfer, below
     try {

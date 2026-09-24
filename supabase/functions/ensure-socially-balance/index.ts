@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
 import { getOrCreateSociallyRecipient } from '../_shared/socially-recipient.ts';
+import { getSetting } from '../_shared/settings.ts';
 
 /**
  * ensure-socially-balance
@@ -17,7 +18,9 @@ const MIN_TOPUP = 40_000;               // ₦40,000 — smallest transfer worth
 const MAX_TOPUP = 200_000;              // ₦200,000 — largest single transfer
 const DEMAND_MULTIPLIER = 1.5;          // Send 1.5× last hour's wholesale spend
 const DEMAND_WINDOW_MINUTES = 60;
-const FLAT_ACQUISITION_FEE = 1_500;     // Retail = wholesale + ₦1,500
+// Retail = wholesale + flat margin — admin-editable (app_settings.flat_acquisition_fee,
+// fetched below); this is only the fallback default.
+const DEFAULT_FLAT_ACQUISITION_FEE = 1_500;
 const LEAD_MONTHLY_PAY = 100_000;       // ₦100,000 per 76 customers
 const LEAD_MONTHLY_TARGET = 76;
 const MIN_MINUTES_BETWEEN_TOPUPS = 5;   // Skip if a top-up was inserted within this window
@@ -59,6 +62,8 @@ Deno.serve(async (req: Request) => {
         });
       }
     }
+
+    const FLAT_ACQUISITION_FEE = await getSetting(admin, 'flat_acquisition_fee', DEFAULT_FLAT_ACQUISITION_FEE);
 
     // ── 0. Expire stale pending auto-topup rows (older than 15 min) ─────────────
     const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();

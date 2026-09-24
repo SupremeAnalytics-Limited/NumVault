@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '@/template';
-import { FLAT_ACQUISITION_FEE } from '@/constants/config';
+import { FLAT_ACQUISITION_FEE as DEFAULT_FLAT_ACQUISITION_FEE } from '@/constants/config';
+import { getSetting } from '@/services/settingsService';
 
 const supabase = getSupabaseClient();
 
@@ -159,6 +160,22 @@ export function detectCategory(title: string): ServiceCategory {
   return 'Other';
 }
 
+// ── Live margin (admin-editable) ──────────────────────────────────────────────
+// Cached briefly so rapid price lookups while browsing don't each hit the DB —
+// an admin change is picked up within a minute, well before it matters for
+// display; purchase-number is the actual source of truth at purchase time.
+let cachedMargin: { value: number; fetchedAt: number } | null = null;
+const MARGIN_CACHE_MS = 60_000;
+
+async function getFlatAcquisitionFee(): Promise<number> {
+  if (cachedMargin && Date.now() - cachedMargin.fetchedAt < MARGIN_CACHE_MS) {
+    return cachedMargin.value;
+  }
+  const value = await getSetting<number>('flat_acquisition_fee', DEFAULT_FLAT_ACQUISITION_FEE);
+  cachedMargin = { value, fetchedAt: Date.now() };
+  return value;
+}
+
 // ── Proxy helper ────────────────────────────────────────────────────────────
 
 async function sociallyProxy(path: string, method = 'GET', body?: Record<string, unknown>) {
@@ -233,6 +250,8 @@ export async function getPackages(providerCode: string, countryCode: string): Pr
     Array.isArray(data?.result) ? data.result :
     Array.isArray(data) ? data : [];
 
+  const margin = await getFlatAcquisitionFee();
+
   const packages: Package[] = raw
     .filter((pkg: any) => pkg && (pkg.project_code || pkg.project_name))
     .map((pkg: any) => {
@@ -242,7 +261,7 @@ export async function getPackages(providerCode: string, countryCode: string): Pr
         project_code: String(pkg.project_code ?? pkg.id ?? ''),
         project_name: String(pkg.project_name ?? pkg.name ?? pkg.title ?? ''),
         price: rawPrice,
-        displayPrice: rawPrice > 0 ? Math.ceil(rawPrice + FLAT_ACQUISITION_FEE) : 0,
+        displayPrice: rawPrice > 0 ? Math.ceil(rawPrice + margin) : 0,
       };
     });
 
