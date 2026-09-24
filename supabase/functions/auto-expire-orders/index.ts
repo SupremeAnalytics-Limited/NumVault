@@ -141,7 +141,7 @@ Deno.serve(async (req: Request) => {
             body: JSON.stringify({
               to: profile.push_token,
               title: '💰 Refund Processed',
-              body: `No OTP was received for ${projectName}. ₦${refundAmount.toLocaleString()} has been refunded to your wallet.`,
+              body: `Your NumVault order has expired and ₦${refundAmount.toLocaleString()} has been refunded to your wallet.`,
               data: { type: 'auto_refund', order_id: orderId, amount: refundAmount },
               sound: 'default',
               priority: 'high',

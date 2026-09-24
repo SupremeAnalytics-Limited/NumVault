@@ -160,7 +160,7 @@ Deno.serve(async (req: Request) => {
           body: JSON.stringify({
             to: profile.push_token,
             title: '\u{1F4B0} Refund Processed',
-            body: `No OTP was received for ${projectName}. \u20a6${refundAmount.toLocaleString()} has been refunded to your wallet.`,
+            body: `Your NumVault order has expired and ₦${refundAmount.toLocaleString()} has been refunded to your wallet.`,
             data: { type: 'expire_refund', order_id, amount: refundAmount },
             sound: 'default',
             priority: 'high',
