@@ -168,6 +168,38 @@ export default function ProfileScreen() {
               <Text style={[styles.menuLabel, { color: Colors.primary }]}>Support / Customer Care</Text>
               <MaterialIcons name="open-in-new" size={14} color={Colors.primary} />
             </TouchableOpacity>
+            {/* Support site — help articles + product news, kept separate from the Instagram DM above */}
+            <TouchableOpacity
+              style={[styles.menuRow, { borderBottomWidth: 0 }]}
+              onPress={async () => {
+                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                await WebBrowser.openBrowserAsync('https://numvault.cloud/support');
+              }}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="campaign" size={18} color={Colors.textMuted} />
+              <Text style={[styles.menuLabel, { color: Colors.text }]}>Support & Updates</Text>
+              <MaterialIcons name="chevron-right" size={18} color={Colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Careers */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Careers</Text>
+          <View style={styles.menuCard}>
+            <TouchableOpacity
+              style={[styles.menuRow, { borderBottomWidth: 0 }]}
+              onPress={async () => {
+                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                await WebBrowser.openBrowserAsync('https://numvault.cloud/jobs');
+              }}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="work-outline" size={18} color={Colors.textMuted} />
+              <Text style={[styles.menuLabel, { color: Colors.text }]}>Open positions at NumVault</Text>
+              <MaterialIcons name="chevron-right" size={18} color={Colors.textMuted} />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -198,8 +230,8 @@ export default function ProfileScreen() {
           <Text style={styles.sectionLabel}>Legal</Text>
           <View style={styles.menuCard}>
             {[
-              { icon: 'privacy-tip', label: 'Privacy Policy', url: 'https://numvault-6fwcjfqw.manus.space/privacy' },
-              { icon: 'gavel', label: 'Terms of Service', url: 'https://numvault-6fwcjfqw.manus.space/terms' },
+              { icon: 'privacy-tip', label: 'Privacy Policy', url: 'https://numvault.cloud/privacy' },
+              { icon: 'gavel', label: 'Terms of Service', url: 'https://numvault.cloud/terms' },
             ].map((item, index, arr) => (
               <TouchableOpacity
                 key={item.label}
