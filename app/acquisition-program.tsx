@@ -28,6 +28,11 @@ type DashTab = 'proving' | 'onteam';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// Module-level (not persisted) — tracks which users have seen the dashboard
+// tour this app session, so the "force every session" admin toggle naturally
+// resets to empty on every cold start without touching AsyncStorage.
+const tourShownThisSession = new Set<string>();
+
 type AcqLaunchState = 'first_launch' | 'downgraded' | 'active_staff';
 
 type LandingStep = {
@@ -399,12 +404,21 @@ export default function AcquisitionProgramScreen() {
 
   // First-visit compulsory dashboard tour — only on the 'proving' tab, once
   // a participant exists and the dashboard is actually showing. Gated per
-  // user id so it never repeats after they've clicked through it once.
+  // user id so it never repeats after they've clicked through it once,
+  // unless the admin has toggled "force every session" on — then it's
+  // gated only by this in-memory flag, which resets on every cold start.
   useEffect(() => {
     if (screen !== 'dashboard' || dashTab !== 'proving' || !participant) return;
     let cancelled = false;
     (async () => {
       try {
+        const forceEverySession = await getSetting<boolean>('dashboard_tour_force_every_session', false);
+        if (forceEverySession) {
+          if (!tourShownThisSession.has(participant.user_id) && !cancelled) {
+            setTimeout(() => { if (!cancelled) setShowTour(true); }, 500);
+          }
+          return;
+        }
         const key = `acq_dashboard_tour_seen_${participant.user_id}`;
         const seen = await AsyncStorage.getItem(key);
         if (!seen && !cancelled) {
@@ -419,6 +433,7 @@ export default function AcquisitionProgramScreen() {
   const finishTour = async () => {
     setShowTour(false);
     if (participant) {
+      tourShownThisSession.add(participant.user_id);
       try { await AsyncStorage.setItem(`acq_dashboard_tour_seen_${participant.user_id}`, '1'); } catch { /* non-fatal */ }
     }
   };

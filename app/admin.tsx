@@ -166,6 +166,8 @@ export default function AdminDashboardScreen() {
   // ── Settings tab ──────────────────────────────────────────────────────────
   const [nearInstantTransfer, setNearInstantTransfer] = useState(false);
   const [transferToggleSaving, setTransferToggleSaving] = useState(false);
+  const [tourForceEverySession, setTourForceEverySession] = useState(false);
+  const [tourToggleSaving, setTourToggleSaving] = useState(false);
   const [marginValue, setMarginValue] = useState('1500');
   const [marginDirty, setMarginDirty] = useState(false);
   const [marginSaving, setMarginSaving] = useState(false);
@@ -177,16 +179,18 @@ export default function AdminDashboardScreen() {
   const loadSettings = useCallback(async () => {
     setJobAdLoading(true);
     try {
-      const [enabled, steps, margin] = await Promise.all([
+      const [enabled, steps, margin, tourForce] = await Promise.all([
         getSetting<boolean>('near_instant_transfer_enabled', false),
         getSetting<JobAdStep[] | null>('job_ad_content', null),
         getSetting<number>('flat_acquisition_fee', 1500),
+        getSetting<boolean>('dashboard_tour_force_every_session', false),
       ]);
       setNearInstantTransfer(!!enabled);
       setJobAdSteps(steps ?? DEFAULT_JOB_AD_STEPS);
       setJobAdDirty(false);
       setMarginValue(String(margin));
       setMarginDirty(false);
+      setTourForceEverySession(!!tourForce);
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -209,6 +213,21 @@ export default function AdminDashboardScreen() {
       showAlert('Could not save', e.message || 'Failed to update the transfer mode.');
     } finally {
       setTransferToggleSaving(false);
+    }
+  };
+
+  const toggleTourForceEverySession = async (value: boolean) => {
+    setTourToggleSaving(true);
+    const previous = tourForceEverySession;
+    setTourForceEverySession(value); // optimistic
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('dashboard_tour_force_every_session', value);
+    } catch (e: any) {
+      setTourForceEverySession(previous);
+      showAlert('Could not save', e.message || 'Failed to update the tour setting.');
+    } finally {
+      setTourToggleSaving(false);
     }
   };
 
@@ -998,6 +1017,32 @@ export default function AdminDashboardScreen() {
               </View>
               <Text style={settingsStyles.hint}>
                 Turn this on once Paystack has approved the business account and transfers are confirmed working. Turning it off at any time reverts immediately to the split.
+              </Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Dashboard tour on every app start</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {tourForceEverySession
+                      ? 'ON — the acquisition dashboard coach mark shows every time the app starts a new session, for every user.'
+                      : 'OFF — the coach mark shows only once ever, per user, the first time they reach the dashboard.'}
+                  </Text>
+                </View>
+                {tourToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={tourForceEverySession}
+                    onValueChange={toggleTourForceEverySession}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={tourForceEverySession ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.hint}>
+                Takes effect immediately — no app update needed. Turn it off to go back to showing it just once per user.
               </Text>
             </View>
 
