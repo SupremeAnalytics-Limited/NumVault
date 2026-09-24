@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
+import { getSetting } from '../_shared/settings.ts';
 
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
@@ -90,8 +91,17 @@ Deno.serve(async (req: Request) => {
     // by the webhook; the split is purely a settlement/account-funding mechanism and
     // does NOT reduce the customer's purchasing balance.
     const isWalletTopup = type === 'wallet_topup';
+
+    // ── Near-instant transfer mode (admin toggle, app_settings) ────────────────
+    // When enabled: 100% of every payment settles to NumVault's main account.
+    // Socially.ng is instead paid the exact wholesale cost of each number via a
+    // direct Paystack transfer, fired from purchase-number right after the sale
+    // — see purchase-number/index.ts. No split, no percentage/ratio guessing,
+    // no T+1 wait. When disabled (default): unchanged current behavior below.
+    const nearInstantTransferEnabled = await getSetting(supabaseClient, 'near_instant_transfer_enabled', false);
+
     // Apply the subaccount split to BOTH direct number purchases AND wallet top-ups.
-    const requiresSplit = (isNumberPurchase || isWalletTopup) && !!sociallySubaccountCode;
+    const requiresSplit = !nearInstantTransferEnabled && (isNumberPurchase || isWalletTopup) && !!sociallySubaccountCode;
 
     const initPayload: Record<string, unknown> = {
       email,
@@ -134,6 +144,8 @@ Deno.serve(async (req: Request) => {
         // number_purchase without wholesale_cost passed (defensive fallback)
         console.warn(`Split [number_purchase]: no wholesale_cost supplied — falling back to subaccount's percentage_charge for amount=₦${amount}`);
       }
+    } else if (nearInstantTransferEnabled && (isNumberPurchase || isWalletTopup)) {
+      console.log(`Split skipped for type=${type}: near_instant_transfer_enabled=true — 100% settles to main account, Socially.ng paid via transfer at purchase time`);
     } else if ((isNumberPurchase || isWalletTopup) && !sociallySubaccountCode) {
       console.warn(`SOCIALLY_SUBACCOUNT_CODE not set — split payment skipped for type=${type}`);
     }

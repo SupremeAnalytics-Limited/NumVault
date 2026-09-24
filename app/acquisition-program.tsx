@@ -19,6 +19,7 @@ import {
   currentBlockNumber, daysRemainingInCurrentWindow, closeMyExpiredBlocks,
 } from '@/services/acquisitionService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
+import { getSetting } from '@/services/settingsService';
 
 type Screen = 'landing' | 'enroll' | 'dashboard' | 'bank_onboarding';
 type DashTab = 'proving' | 'onteam';
@@ -27,13 +28,18 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type AcqLaunchState = 'first_launch' | 'downgraded' | 'active_staff';
 
-const LANDING_STEPS: {
+type LandingStep = {
   label: string;
   icon: 'schedule' | 'phone-android' | 'emoji-events';
   title: string;
   body: string;
   sections?: { heading: string; text: string }[];
-}[] = [
+};
+
+// Default copy. Editable from the admin dashboard (Settings tab) without an
+// app update — see loadAll() below, which merges any saved job_ad_content
+// setting on top of these defaults (icon/label stay fixed; only the text does).
+const LANDING_STEPS: LandingStep[] = [
   {
     label: 'Side income',
     icon: 'schedule' as const,
@@ -122,6 +128,7 @@ export default function AcquisitionProgramScreen() {
   const [dashTab, setDashTab] = useState<DashTab>('proving');
 
   // Landing
+  const [landingSteps, setLandingSteps] = useState<LandingStep[]>(LANDING_STEPS);
   const [landingStep, setLandingStep] = useState(0);
   const [acqLaunchState, setAcqLaunchState] = useState<AcqLaunchState>('first_launch');
   const landingScrollRef = useRef<ScrollView>(null);
@@ -191,6 +198,18 @@ export default function AcquisitionProgramScreen() {
       await closeMyExpiredBlocks().catch(() => {});
       const [p, lib] = await Promise.all([getMyParticipant(), getPitchLibrary()]);
       setPitches(lib);
+
+      // Admin-editable job ad copy — falls back to the built-in defaults on
+      // any error or when nothing has been saved yet, so this screen never
+      // depends on the setting existing.
+      getSetting<{ title: string; body: string; sections?: { heading: string; text: string }[] }[] | null>(
+        'job_ad_content', null,
+      ).then((saved) => {
+        if (!saved || !Array.isArray(saved)) return;
+        setLandingSteps(LANDING_STEPS.map((defaultStep, i) => (
+          saved[i] ? { ...defaultStep, title: saved[i].title, body: saved[i].body, sections: saved[i].sections ?? defaultStep.sections } : defaultStep
+        )));
+      }).catch(() => { /* keep defaults */ });
       if (p) {
         setParticipant(p);
         resolveAcqLaunchState(p);
@@ -458,7 +477,7 @@ export default function AcquisitionProgramScreen() {
             showsHorizontalScrollIndicator={false}
             style={{ flex: 1 }}
           >
-            {LANDING_STEPS.map((step, i) => (
+            {landingSteps.map((step, i) => (
               <ScrollView key={i} style={{ width: SCREEN_WIDTH }} showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.landingPage}>
                 <View style={styles.landingIconRow}>
@@ -482,7 +501,7 @@ export default function AcquisitionProgramScreen() {
 
           <View style={[styles.landingFooter, { paddingBottom: insets.bottom + 24 }]}>
             <View style={styles.landingDots}>
-              {LANDING_STEPS.map((_, i) => (
+              {landingSteps.map((_, i) => (
                 <View key={i} style={[styles.landingDot, i === landingStep && styles.landingDotActive]} />
               ))}
             </View>
@@ -490,7 +509,7 @@ export default function AcquisitionProgramScreen() {
               style={styles.ctaBtn}
               onPress={async () => {
                 await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                if (landingStep < LANDING_STEPS.length - 1) {
+                if (landingStep < landingSteps.length - 1) {
                   const next = landingStep + 1;
                   landingScrollRef.current?.scrollTo({ x: next * SCREEN_WIDTH, animated: true });
                   setLandingStep(next);
@@ -506,7 +525,7 @@ export default function AcquisitionProgramScreen() {
               activeOpacity={0.85}
             >
               <Text style={styles.ctaBtnText}>
-                {landingStep < LANDING_STEPS.length - 1
+                {landingStep < landingSteps.length - 1
                   ? 'Next'
                   : participant ? 'View My Progress' : 'Accept Job Offer'}
               </Text>

@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, ActivityIndicator, RefreshControl, Modal,
-  Platform, TextInput,
+  Platform, TextInput, Switch,
 } from 'react-native';
+import { getSetting, setSetting } from '@/services/settingsService';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -38,13 +39,42 @@ const GOLD_BG = 'rgba(251,191,36,0.12)';
 const BLUE = '#60a5fa';
 const BLUE_BG = 'rgba(96,165,250,0.12)';
 
+// Default job-ad copy — mirrors LANDING_STEPS in app/acquisition-program.tsx.
+// Used to seed the editor and as the reset target; the live screen's own
+// fallback lives in that file so it never depends on this admin screen loading.
+const DEFAULT_JOB_AD_STEPS: JobAdStep[] = [
+  {
+    title: 'A side income that fits your life',
+    body: "Whether you're in school, at work, or building your own thing — we've created a way for you to earn on the side without changing anything about your routine. No office. No fixed hours. Just results.",
+  },
+  {
+    title: 'Protect your number. Power your business.',
+    body: "NumVault gives you a dedicated number for any platform — one that's yours permanently, with no recurring fees. It keeps your personal number private while giving your businesses their own dedicated phone numbers across 2,300+ apps and services. This protects your private contact information from data reselling and spam messages from other platforms.",
+  },
+  {
+    title: 'Earn Your Job Position with our company as a Customer Acquisition Staff',
+    body: '',
+    sections: [
+      { heading: 'The Money', text: 'Earn up to ₦600,000 over six months. Move fast enough and you could earn the full ₦600,000 in one day.' },
+      { heading: 'How We Pay You', text: 'We pay via Paystack to Nigerian bank accounts (Palmpay, Kuda, Opay). No card details needed. 76 customers = ₦100,000. Two ₦50,000 payments: one at 38 customers, one at 76.' },
+      { heading: 'What It Takes', text: 'You share your referral code. A referral counts when a new customer signs up with your code and pays for at least one number. 30 days per month to reach 76. Progress saved at 19, 38, and 57 customers.' },
+      { heading: 'Extend Your Contract', text: "If you earn ₦600,000 in one day—meaning you're that efficient—contact support@numvault.cloud to extend your contract to a full year." },
+    ],
+  },
+];
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface AdminParticipant extends AcquisitionParticipant {
   referred_count: number;
   validated_count: number;
   total_paid: number;
 }
-type AdminTab = 'overview' | 'participants' | 'payouts';
+type AdminTab = 'overview' | 'participants' | 'payouts' | 'settings';
+
+// Mirrors LANDING_STEPS in app/acquisition-program.tsx — the pitch copy shown
+// on that screen. Editing here overrides the hardcoded fallback there.
+type JobAdSection = { heading: string; text: string };
+type JobAdStep = { title: string; body: string; sections?: JobAdSection[] };
 
 // Payout enriched with customer list for review
 interface ReviewPayout extends LeadPayout {
@@ -133,7 +163,92 @@ export default function AdminDashboardScreen() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [selectedPayoutForReject, setSelectedPayoutForReject] = useState<ReviewPayout | null>(null);
 
+  // ── Settings tab ──────────────────────────────────────────────────────────
+  const [nearInstantTransfer, setNearInstantTransfer] = useState(false);
+  const [transferToggleSaving, setTransferToggleSaving] = useState(false);
+  const [jobAdSteps, setJobAdSteps] = useState<JobAdStep[] | null>(null);
+  const [jobAdLoading, setJobAdLoading] = useState(false);
+  const [jobAdSaving, setJobAdSaving] = useState(false);
+  const [jobAdDirty, setJobAdDirty] = useState(false);
+
+  const loadSettings = useCallback(async () => {
+    setJobAdLoading(true);
+    try {
+      const [enabled, steps] = await Promise.all([
+        getSetting<boolean>('near_instant_transfer_enabled', false),
+        getSetting<JobAdStep[] | null>('job_ad_content', null),
+      ]);
+      setNearInstantTransfer(!!enabled);
+      setJobAdSteps(steps ?? DEFAULT_JOB_AD_STEPS);
+      setJobAdDirty(false);
+    } catch (e) {
+      console.warn('Failed to load settings:', e);
+    } finally {
+      setJobAdLoading(false);
+    }
+  }, []);
+
   useEffect(() => { checkAndLoad(); }, []);
+  useEffect(() => { if (activeTab === 'settings' && jobAdSteps === null) loadSettings(); }, [activeTab, jobAdSteps, loadSettings]);
+
+  const toggleNearInstantTransfer = async (value: boolean) => {
+    setTransferToggleSaving(true);
+    const previous = nearInstantTransfer;
+    setNearInstantTransfer(value); // optimistic
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('near_instant_transfer_enabled', value);
+    } catch (e: any) {
+      setNearInstantTransfer(previous);
+      showAlert('Could not save', e.message || 'Failed to update the transfer mode.');
+    } finally {
+      setTransferToggleSaving(false);
+    }
+  };
+
+  const updateJobAdField = (stepIdx: number, field: 'title' | 'body', value: string) => {
+    setJobAdSteps((prev) => {
+      if (!prev) return prev;
+      const next = prev.map((s, i) => (i === stepIdx ? { ...s, [field]: value } : s));
+      return next;
+    });
+    setJobAdDirty(true);
+  };
+
+  const updateJobAdSectionText = (stepIdx: number, sectionIdx: number, value: string) => {
+    setJobAdSteps((prev) => {
+      if (!prev) return prev;
+      const next = prev.map((s, i) => {
+        if (i !== stepIdx || !s.sections) return s;
+        const sections = s.sections.map((sec, j) => (j === sectionIdx ? { ...sec, text: value } : sec));
+        return { ...s, sections };
+      });
+      return next;
+    });
+    setJobAdDirty(true);
+  };
+
+  const saveJobAdContent = async () => {
+    if (!jobAdSteps) return;
+    setJobAdSaving(true);
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('job_ad_content', jobAdSteps);
+      setJobAdDirty(false);
+      showAlert('Saved', 'The acquisition program screen will show this text on next load — no app update needed.');
+    } catch (e: any) {
+      showAlert('Could not save', e.message || 'Failed to save the job ad text.');
+    } finally {
+      setJobAdSaving(false);
+    }
+  };
+
+  const resetJobAdContent = () => {
+    showAlert('Reset to default text?', 'This discards your edits and restores the built-in copy.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reset', style: 'destructive', onPress: () => { setJobAdSteps(DEFAULT_JOB_AD_STEPS); setJobAdDirty(true); } },
+    ]);
+  };
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -452,6 +567,7 @@ export default function AdminDashboardScreen() {
     { key: 'overview',      label: 'Overview',   icon: 'dashboard' },
     { key: 'participants',  label: 'Team',        icon: 'groups',   badge: participants.length },
     { key: 'payouts',       label: 'Approvals',   icon: 'payments', badge: underReviewCount || undefined },
+    { key: 'settings',      label: 'Settings',    icon: 'tune' },
   ];
 
   return (
@@ -829,6 +945,102 @@ export default function AdminDashboardScreen() {
             ) : null}
           </>
         )}
+
+        {/* ─────────────────── SETTINGS ─────────────────── */}
+        {activeTab === 'settings' && (
+          <>
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Near-instant Socially.ng transfers</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {nearInstantTransfer
+                      ? 'ON — every number purchase pays Socially.ng its exact wholesale cost via a direct Paystack transfer, right away. No settlement split.'
+                      : 'OFF — using the current T+1 settlement split. Wholesale account depreciates at purchase time and is replenished the next day; margin is still kept immediately either way.'}
+                  </Text>
+                </View>
+                {transferToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={nearInstantTransfer}
+                    onValueChange={toggleNearInstantTransfer}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={nearInstantTransfer ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.hint}>
+                Turn this on once Paystack has approved the business account and transfers are confirmed working. Turning it off at any time reverts immediately to the split.
+              </Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <Text style={settingsStyles.cardTitle}>Job ad text (acquisition-program screen)</Text>
+                <TouchableOpacity onPress={resetJobAdContent} activeOpacity={0.7}>
+                  <Text style={settingsStyles.resetLink}>Reset to default</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={settingsStyles.cardSub}>
+                Edits here go live the next time someone opens that screen — no app update needed.
+              </Text>
+
+              {jobAdLoading || !jobAdSteps ? (
+                <ActivityIndicator color={GREEN} style={{ marginTop: 16 }} />
+              ) : (
+                <>
+                  {jobAdSteps.map((step, i) => (
+                    <View key={i} style={settingsStyles.stepBlock}>
+                      <Text style={settingsStyles.stepLabel}>Step {i + 1}</Text>
+                      <Text style={settingsStyles.fieldLabel}>Title</Text>
+                      <TextInput
+                        style={settingsStyles.input}
+                        value={step.title}
+                        onChangeText={(t) => updateJobAdField(i, 'title', t)}
+                        multiline
+                      />
+                      {step.sections ? (
+                        step.sections.map((sec, j) => (
+                          <View key={j}>
+                            <Text style={settingsStyles.fieldLabel}>{sec.heading}</Text>
+                            <TextInput
+                              style={[settingsStyles.input, settingsStyles.inputMultiline]}
+                              value={sec.text}
+                              onChangeText={(t) => updateJobAdSectionText(i, j, t)}
+                              multiline
+                            />
+                          </View>
+                        ))
+                      ) : (
+                        <>
+                          <Text style={settingsStyles.fieldLabel}>Body</Text>
+                          <TextInput
+                            style={[settingsStyles.input, settingsStyles.inputMultiline]}
+                            value={step.body}
+                            onChangeText={(t) => updateJobAdField(i, 'body', t)}
+                            multiline
+                          />
+                        </>
+                      )}
+                    </View>
+                  ))}
+
+                  <TouchableOpacity
+                    style={[settingsStyles.saveBtn, (!jobAdDirty || jobAdSaving) && settingsStyles.saveBtnDisabled]}
+                    onPress={saveJobAdContent}
+                    disabled={!jobAdDirty || jobAdSaving}
+                    activeOpacity={0.85}
+                  >
+                    {jobAdSaving ? <ActivityIndicator color="#061006" /> : (
+                      <Text style={settingsStyles.saveBtnText}>{jobAdDirty ? 'Save changes' : 'Saved'}</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </>
+        )}
       </ScrollView>
 
       {/* ── Detail Modal ── */}
@@ -1040,6 +1252,31 @@ const emStyles = StyleSheet.create({
   iconWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 16, fontWeight: '700', color: TEXT },
   sub: { fontSize: 12, color: MUTED, textAlign: 'center', maxWidth: 240, lineHeight: 20 },
+});
+
+const settingsStyles = StyleSheet.create({
+  card: {
+    backgroundColor: SURFACE, borderRadius: 14, borderWidth: 1, borderColor: BORDER,
+    padding: 16, marginBottom: 12, gap: 8,
+  },
+  rowBetween: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  cardTitle: { fontSize: 14, fontWeight: '700', color: TEXT },
+  cardSub: { fontSize: 12, color: TEXT2, lineHeight: 18 },
+  hint: { fontSize: 11, color: MUTED, lineHeight: 16, marginTop: 4 },
+  resetLink: { fontSize: 12, color: ORANGE, fontWeight: '600' },
+  stepBlock: { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: BORDER, gap: 6 },
+  stepLabel: { fontSize: 11, fontWeight: '700', color: GREEN, letterSpacing: 0.5, textTransform: 'uppercase' },
+  fieldLabel: { fontSize: 11, color: MUTED, marginTop: 6 },
+  input: {
+    backgroundColor: SURFACE2, borderWidth: 1, borderColor: BORDER2, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 10, color: TEXT, fontSize: 13,
+  },
+  inputMultiline: { minHeight: 70, textAlignVertical: 'top' },
+  saveBtn: {
+    backgroundColor: GREEN, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 16,
+  },
+  saveBtnDisabled: { backgroundColor: MUTED2, opacity: 0.6 },
+  saveBtnText: { color: '#061006', fontWeight: '700', fontSize: 14 },
 });
 
 // ── Styles ────────────────────────────────────────────────────────────────────

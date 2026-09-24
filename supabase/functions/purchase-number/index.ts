@@ -1,5 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
+import { getSetting } from '../_shared/settings.ts';
+import { getOrCreateSociallyRecipient } from '../_shared/socially-recipient.ts';
+import { paystackTransferFee } from '../_shared/paystack-fees.ts';
 
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
@@ -68,6 +71,7 @@ Deno.serve(async (req: Request) => {
     // Pricing model: customer pays wholesale + ₦1,500 flat fee.
     const FLAT_ACQUISITION_FEE = 1500; // ₦1,500
     let expectedRetail: number | null = null;
+    let wholesaleCost: number | null = null; // captured for the near-instant transfer, below
     try {
       const socially_url = Deno.env.get('SUPABASE_URL') ?? '';
       const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -91,6 +95,7 @@ Deno.serve(async (req: Request) => {
       );
       if (matchingPkg) {
         const wholesale = Number(matchingPkg.price ?? 0);
+        wholesaleCost = wholesale;
         expectedRetail = Math.ceil(wholesale + FLAT_ACQUISITION_FEE);
         const clientRetail = Math.ceil(Number(amount_paid));
         // Allow ±50 naira tolerance (covers rounding and temporary price shifts)
@@ -460,6 +465,46 @@ Deno.serve(async (req: Request) => {
         description: `${project_name || project_code} number - ${country_name || country_code}`,
       });
     }
+
+    // ── Near-instant transfer: pay Socially.ng the exact wholesale cost ──────
+    // Admin toggle (app_settings.near_instant_transfer_enabled). When on, this
+    // purchase's wholesale cost is sent to Socially.ng right now via a direct
+    // Paystack transfer, instead of relying on the next-day settlement split.
+    // Awaited (not fire-and-forget) so a dropped connection can't leave a real
+    // money transfer unaccounted for — wrapped in try/catch so a transfer
+    // failure only logs, it never fails a sale the customer already received.
+    // The order above is already committed either way.
+    if (wholesaleCost != null && wholesaleCost > 0) {
+      const nearInstantTransferEnabled = await getSetting(supabaseAdmin, 'near_instant_transfer_enabled', false);
+      if (nearInstantTransferEnabled) {
+        try {
+          const secretKey = Deno.env.get('PAYSTACK_SECRET_KEY') ?? '';
+          const recipientCode = await getOrCreateSociallyRecipient(secretKey);
+          const fee = paystackTransferFee(wholesaleCost);
+          const transferRef = `nvxfer_${sociallyReference}`;
+          const transferRes = await fetch(`${PAYSTACK_BASE}/transfer`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              source: 'balance',
+              amount: Math.round(wholesaleCost * 100),
+              recipient: recipientCode,
+              reason: `NumVault wholesale — ${sociallyReference}`,
+              reference: transferRef,
+            }),
+          });
+          const transferData = await transferRes.json();
+          if (!transferRes.ok || !transferData.status) {
+            console.error(`Near-instant transfer FAILED for ${sociallyReference}: ₦${wholesaleCost} (Paystack fee ₦${fee}) —`, JSON.stringify(transferData));
+          } else {
+            console.log(`Near-instant transfer sent: ₦${wholesaleCost} → Socially.ng (Paystack fee ₦${fee}, absorbed by NumVault) for ${sociallyReference}, ref=${transferRef}`);
+          }
+        } catch (transferErr) {
+          console.error(`Near-instant transfer EXCEPTION for ${sociallyReference}:`, transferErr);
+        }
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     return new Response(JSON.stringify({
       data: {
