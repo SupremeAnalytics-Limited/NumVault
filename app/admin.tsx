@@ -1098,8 +1098,9 @@ export default function AdminDashboardScreen() {
                             {(r as any).email_normalized ?? r.customer_id}
                           </Text>
                           <Text style={styles.refCustomerMeta}>
-                            Block {r.block_number ?? '—'} ·{' '}
-                            {r.validated_at ? `Validated ${new Date(r.validated_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}` : 'Not validated'}
+                            {r.validated_at
+                              ? `Block ${r.block_number ?? '—'} · Validated ${new Date(r.validated_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}`
+                              : 'Not validated'}
                           </Text>
                           {(r as any).validation_note ? (
                             <Text style={{ fontSize: 10, color: RED }}>{(r as any).validation_note}</Text>
