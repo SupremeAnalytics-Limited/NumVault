@@ -36,7 +36,7 @@ Deno.serve(async (req: Request) => {
     // WHY transaction_charge instead of percentage_charge for number_purchase:
     //   - displayPrice = Math.ceil(wholesale * 1.4) can differ from wholesale * 1.4
     //     by up to ₦0.99 due to ceiling rounding.
-    //   - percentage_charge=71.43% on a ceiling'd retail price therefore sends slightly
+    //   - percentage_charge on a ceiling'd retail price therefore sends slightly
     //     the wrong amount to Socially.ng.
     //   - transaction_charge = round((retail - wholesale) * 100) kobo gives NumVault
     //     exactly its markup and lets Socially.ng receive the exact wholesale cost.
@@ -58,26 +58,34 @@ Deno.serve(async (req: Request) => {
 
     // ── Split payment for number purchases ────────────────────────────────────
     // When SOCIALLY_SUBACCOUNT_CODE secret is set (after running setup-subaccount),
-    // every number-purchase payment automatically routes 71.43% to Socially.ng's
-    // Palmpay account at Paystack's settlement layer — no manual transfers needed.
+    // every number-purchase payment automatically applies a split at Paystack's
+    // settlement layer — no manual transfers needed.
     //
-    // bearer: 'account' → main account pays the Paystack transaction fee, so
-    // Socially.ng always receives the full split % of the gross charge amount.
+    // bearer: 'account' → main account pays the Paystack transaction fee. In
+    // practice the Paystack dashboard's "pass charges to customer" setting
+    // overrides this, so the customer pays the fee on top (confirmed on real
+    // transactions: fees_split.params.bearer comes back "customer" regardless
+    // of what this field sends).
     //
-    // ⚠️  Paystack definition: percentage_charge = % the SUBACCOUNT receives.
-    // Subaccount is set to 71.43% → Socially.ng receives 71.43%, NumVault keeps 28.57%.
+    // ⚠️  Verified against real settlement data (fees_split on live transactions):
+    // percentage_charge set on the SUBACCOUNT is the cut that goes to the
+    // INTEGRATION (main/NumVault) account, not the subaccount. The subaccount
+    // (Socially.ng) receives (100 − percentage_charge)%. With the subaccount
+    // currently set to percentage_charge=71.43, NumVault keeps 71.43% and
+    // Socially.ng gets 28.57% — the reverse of the intended 71.43%-to-Socially.ng
+    // business model described below. See setup-subaccount/index.ts to correct.
     const sociallySubaccountCode = Deno.env.get('SOCIALLY_SUBACCOUNT_CODE');
     const isNumberPurchase = type === 'number_purchase';
     // Wallet top-ups also require a split: the customer receives the full top-up
     // amount as purchasing power, but the underlying economics must pre-allocate
     // the supplier share immediately at payment time.
     //
-    // Business model (1.4× markup applies equally to wallet funding):
+    // Intended business model (1.4× markup applies equally to wallet funding):
     //   Supplier allocation = top-up amount ÷ 1.4  → 71.43% → Socially.ng (Palmpay)
     //   NumVault allocation = top-up amount − supplier allocation → 28.57%
     //
-    // ⚠️  Paystack definition: percentage_charge = % the SUBACCOUNT receives.
-    // Subaccount is set to 71.43% → Socially.ng receives 71.43%, NumVault keeps 28.57%.
+    // ⚠️  As configured today this is NOT what happens — see the percentage_charge
+    // note above. Socially.ng actually receives 28.57%, NumVault keeps 71.43%.
     // The customer's wallet is credited with the full top-up amount
     // by the webhook; the split is purely a settlement/account-funding mechanism and
     // does NOT reduce the customer's purchasing balance.
@@ -117,13 +125,14 @@ Deno.serve(async (req: Request) => {
           `Socially.ng=₦${(amount - numvaultMarkupKobo / 100).toFixed(2)}, subaccount=${sociallySubaccountCode}`
         );
       } else if (isWalletTopup) {
-        // Wallet top-up: use the subaccount's percentage_charge (71.43%).
-        // No transaction_charge override — the 1.4× economics apply to the full
-        // top-up amount and percentage_charge=71.43 is exact for round amounts.
-        console.log(`Split [wallet_topup]: amount=₦${amount}, subaccount=${sociallySubaccountCode} (using percentage_charge=71.43%)`);
+        // Wallet top-up: uses the subaccount's percentage_charge as-is.
+        // No transaction_charge override. NOTE: percentage_charge sets the
+        // main (integration) account's cut, not the subaccount's — see the
+        // ⚠️ note above. At the current value this under-funds Socially.ng.
+        console.log(`Split [wallet_topup]: amount=₦${amount}, subaccount=${sociallySubaccountCode} (using percentage_charge)`);
       } else {
         // number_purchase without wholesale_cost passed (defensive fallback)
-        console.warn(`Split [number_purchase]: no wholesale_cost supplied — falling back to percentage_charge=71.43% for amount=₦${amount}`);
+        console.warn(`Split [number_purchase]: no wholesale_cost supplied — falling back to subaccount's percentage_charge for amount=₦${amount}`);
       }
     } else if ((isNumberPurchase || isWalletTopup) && !sociallySubaccountCode) {
       console.warn(`SOCIALLY_SUBACCOUNT_CODE not set — split payment skipped for type=${type}`);

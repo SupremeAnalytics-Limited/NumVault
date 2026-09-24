@@ -14,11 +14,15 @@ const PAYSTACK_BASE = 'https://api.paystack.co';
 const SOCIALLY_ACCOUNT_NUMBER = '6635796668';
 const SOCIALLY_ACCOUNT_NAME = 'Riteweb Digital Services-Sim(Paymentpoint)';
 
-// percentage_charge = what the SUBACCOUNT (Socially.ng) receives.
-// With wholesale + ₦1,500 pricing: Socially.ng receives wholesale (variable %);
-// we keep ₦1,500 flat. The subaccount split is an approximation — exact
-// wholesale recovery is handled operationally via manual settlement.
-// 71.43% approximates the old 1.4× model for backwards compatibility.
+// ⚠️  Verified against real settlement data (fees_split on live transactions):
+// percentage_charge set on a subaccount is the cut that goes to the
+// INTEGRATION (main/NumVault) account, NOT the subaccount. The subaccount
+// (Socially.ng) actually receives (100 − percentage_charge)%.
+// Intended model: Socially.ng receives wholesale (~71.43%); NumVault keeps
+// ~28.57% (~₦1,500 flat via transaction_charge on number_purchase instead).
+// At the current value (71.43), NumVault keeps 71.43% and Socially.ng gets
+// 28.57% — the reverse of intent. To make Socially.ng actually receive
+// 71.43%, this constant needs to be set to 28.57, not 71.43.
 const SUBACCOUNT_PERCENTAGE = 71.43;
 
 Deno.serve(async (req: Request) => {
@@ -102,16 +106,20 @@ Deno.serve(async (req: Request) => {
             account_number: SOCIALLY_ACCOUNT_NUMBER,
             percentage_charge_was: currentPct,
             percentage_charge_now: updatedPct,
-            note: `FIXED: percentage_charge updated from ${currentPct}% to ${updatedPct}%. Socially.ng (subaccount) now receives ${updatedPct}%, NumVault keeps ${(100 - updatedPct).toFixed(2)}%.`,
-            next_step: 'Verify SOCIALLY_SUBACCOUNT_CODE secret is set. New purchases will now apply the corrected split.',
+            // NOTE: percentage_charge is the INTEGRATION (main/NumVault) account's
+            // cut, not the subaccount's — verified against real settlement data.
+            // Socially.ng (subaccount) actually receives (100 − updatedPct)%.
+            note: `percentage_charge updated from ${currentPct}% to ${updatedPct}%. NumVault (integration) now receives ${updatedPct}%, Socially.ng (subaccount) receives ${(100 - updatedPct).toFixed(2)}%.`,
+            next_step: 'Verify SOCIALLY_SUBACCOUNT_CODE secret is set. New purchases will now apply this split.',
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
           // ──────────────────────────────────────────────────────────────────
         }
 
-        // Already correct
-        console.log(`Subaccount already exists and correct: ${existing.subaccount_code}`);
+        // Matches SUBACCOUNT_PERCENTAGE — not necessarily the intended business split,
+        // see the ⚠️ note above SUBACCOUNT_PERCENTAGE.
+        console.log(`Subaccount already exists, percentage_charge matches configured value: ${existing.subaccount_code}`);
         return new Response(JSON.stringify({
           success: true,
           already_existed: true,
@@ -119,7 +127,9 @@ Deno.serve(async (req: Request) => {
           subaccount_code: existing.subaccount_code,
           account_number: SOCIALLY_ACCOUNT_NUMBER,
           percentage_charge: currentPct,
-          note: `percentage_charge=${currentPct} — Socially.ng (subaccount) receives ${currentPct}%, NumVault keeps ${(100 - currentPct).toFixed(2)}%. Split is correctly configured.`,
+          // NOTE: percentage_charge is the INTEGRATION (main/NumVault) account's
+          // cut, not the subaccount's — verified against real settlement data.
+          note: `percentage_charge=${currentPct} — NumVault (integration) receives ${currentPct}%, Socially.ng (subaccount) receives ${(100 - currentPct).toFixed(2)}%.`,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -143,8 +153,9 @@ Deno.serve(async (req: Request) => {
     // ────────────────────────────────────────────────────────────────────────
 
     // ── Create subaccount ────────────────────────────────────────────────────
-    // percentage_charge = what the SUBACCOUNT (Socially.ng) receives.
-    // 71.43% → Socially.ng; 28.57% → NumVault main account.
+    // percentage_charge = what the INTEGRATION (main/NumVault) account receives.
+    // At SUBACCOUNT_PERCENTAGE=71.43, NumVault gets 71.43%, Socially.ng (the
+    // subaccount) gets 28.57% — see the ⚠️ note above SUBACCOUNT_PERCENTAGE.
     const createRes = await fetch(`${PAYSTACK_BASE}/subaccount`, {
       method: 'POST',
       headers: {
@@ -156,7 +167,7 @@ Deno.serve(async (req: Request) => {
         settlement_bank: palmpay.code,
         account_number: SOCIALLY_ACCOUNT_NUMBER,
         percentage_charge: SUBACCOUNT_PERCENTAGE,
-        description: 'NumVault — Socially.ng cost-recovery split (subaccount receives 71.43% of each sale)',
+        description: 'NumVault — Socially.ng cost-recovery split',
         primary_contact_email: ADMIN_EMAIL,
       }),
     });
@@ -192,7 +203,8 @@ Deno.serve(async (req: Request) => {
       bank_code: palmpay.code,
       bank_name: palmpay.name,
       percentage_charge: SUBACCOUNT_PERCENTAGE,
-      note: `percentage_charge=${SUBACCOUNT_PERCENTAGE} — Socially.ng receives ${SUBACCOUNT_PERCENTAGE}%, NumVault keeps ${(100 - SUBACCOUNT_PERCENTAGE).toFixed(2)}%.`,
+      // NOTE: percentage_charge is the INTEGRATION (main/NumVault) account's cut.
+      note: `percentage_charge=${SUBACCOUNT_PERCENTAGE} — NumVault (integration) receives ${SUBACCOUNT_PERCENTAGE}%, Socially.ng (subaccount) receives ${(100 - SUBACCOUNT_PERCENTAGE).toFixed(2)}%.`,
       settlement_action: 'MANUAL STEP REQUIRED: Go to Paystack Dashboard → Settings → Preferences → Settlement Schedule → set to Manual to prevent auto-settlement before Lead payouts.',
       next_step: `Add this as a Supabase secret named SOCIALLY_SUBACCOUNT_CODE with value: ${subaccountCode}`,
       paystack_response: createData.data,
