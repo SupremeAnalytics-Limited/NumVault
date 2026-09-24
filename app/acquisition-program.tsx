@@ -460,6 +460,17 @@ export default function AcquisitionProgramScreen() {
     return () => { cancelled = true; };
   }, [screen, dashTab, participant?.id]);
 
+  // Safety net: if the underlying tab/screen changes away while the tour is
+  // showing (e.g. the participant auto-qualifies mid-tour and dashTab flips
+  // to 'onteam'), the cards being measured/scrolled-to unmount out from
+  // under it — hide the tour immediately rather than let it keep trying to
+  // measure a view that no longer exists.
+  useEffect(() => {
+    if (showTour && (screen !== 'dashboard' || dashTab !== 'proving')) {
+      setShowTour(false);
+    }
+  }, [screen, dashTab, showTour]);
+
   const finishTour = async () => {
     setShowTour(false);
     if (participant) {

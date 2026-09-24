@@ -49,17 +49,28 @@ export default function DashboardTour({ visible, steps, scrollViewRef, onComplet
     measureAndScrollToStep(stepIndex);
   }, [visible, stepIndex]);
 
+  const glowLoop = useRef<Animated.CompositeAnimation | null>(null);
+
   useEffect(() => {
     if (!rect) return;
+    // fade shares a node with glow's borderColor animation below (the
+    // highlight box), so both must run on the JS driver — mixing a
+    // natively-driven and JS-driven animated value on the same Animated.View
+    // is unreliable in release builds.
     fade.setValue(0);
-    Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+    Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: false }).start();
+
+    glowLoop.current?.stop();
     glow.setValue(0);
-    Animated.loop(
+    glowLoop.current = Animated.loop(
       Animated.sequence([
         Animated.timing(glow, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
         Animated.timing(glow, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
       ]),
-    ).start();
+    );
+    glowLoop.current.start();
+
+    return () => { glowLoop.current?.stop(); };
   }, [rect]);
 
   const measureAndScrollToStep = (index: number) => {
