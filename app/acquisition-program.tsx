@@ -13,9 +13,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAlert } from '@/template';
 import DashboardTour, { TourStep } from '@/components/DashboardTour';
 import {
-  AcquisitionParticipant, ReferredCustomer, PitchItem, LeadPayout,
+  AcquisitionParticipant, ReferredCustomer, PitchItem, LeadPayout, PendingReferral,
   getMyParticipant, enrollInProgram, reEnrollInProgram,
-  getMyReferredCustomers, getPitchLibrary,
+  getMyReferredCustomers, getMyPendingReferrals, getPitchLibrary,
   daysRemainingInQualification, getMyPayouts,
   computeCycleProgress, paidPeriodsRemaining,
   currentBlockNumber, daysRemainingInCurrentWindow, closeMyExpiredBlocks,
@@ -149,6 +149,8 @@ export default function AcquisitionProgramScreen() {
   const [reqOpen, setReqOpen] = useState(false);
   const [c2Open, setC2Open] = useState(false);
   const [pitchOpen, setPitchOpen] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [pendingList, setPendingList] = useState<PendingReferral[]>([]);
   const [showWelcome, setShowWelcome] = useState(false);
   const welcomeOpacity = useRef(new Animated.Value(0)).current;
 
@@ -408,6 +410,15 @@ export default function AcquisitionProgramScreen() {
     });
   };
 
+  const togglePending = async () => {
+    await Haptics.selectionAsync();
+    const next = !pendingOpen;
+    setPendingOpen(next);
+    if (next) {
+      try { setPendingList(await getMyPendingReferrals()); } catch { /* keep last list */ }
+    }
+  };
+
   const triggerWelcome = () => {
     setShowWelcome(true);
     Animated.timing(welcomeOpacity, { toValue: 1, duration: 400, useNativeDriver: true }).start();
@@ -532,6 +543,8 @@ export default function AcquisitionProgramScreen() {
   };
 
   const blockNum = participant ? currentBlockNumber(participant) : 1;
+  const pendingCount = referred.filter((r) => !r.validated).length;
+
   const monthsRemaining = paidPeriodsRemaining(participant ?? { paid_periods_completed: 0 } as AcquisitionParticipant);
   const potentialRemaining = monthsRemaining * 100000;
 
@@ -1044,6 +1057,34 @@ export default function AcquisitionProgramScreen() {
                   ) : null}
                 </View>
 
+                {/* ── SIGNED UP, NOT BOUGHT YET (both tabs) ── */}
+                <View style={styles.scard}>
+                  <TouchableOpacity style={styles.scardHdr} onPress={togglePending} activeOpacity={0.8}>
+                    <View style={styles.scardIcon}>
+                      <MaterialIcons name="person-search" size={16} color={GREEN} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.scardTitle}>Signed up, not bought yet ({pendingCount})</Text>
+                      <Text style={styles.scardSub}>Follow up so they count toward your 76</Text>
+                    </View>
+                    <MaterialIcons name={pendingOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} size={20} color={MUTED} />
+                  </TouchableOpacity>
+                  {pendingOpen ? (
+                    <View style={styles.scardBody}>
+                      {pendingList.length === 0 ? (
+                        <Text style={styles.ruleText}>No one waiting. Everyone who used your code has bought.</Text>
+                      ) : pendingList.map((r) => (
+                        <View key={r.id} style={styles.ruleRow}>
+                          <View style={styles.ruleDot} />
+                          <Text style={styles.ruleText}>
+                            {r.label}  <Text style={{ color: MUTED }}>· signed up {daysAgo(r.signup_at)}</Text>
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+
                 {/* Referral card */}
                 <View style={styles.refCard} ref={refCardRef}>
                   <View style={styles.refTop}>
@@ -1379,6 +1420,12 @@ const segStyles = StyleSheet.create({
 function isWithin30Days(dateStr: string | null | undefined): boolean {
   if (!dateStr) return false;
   return Date.now() < new Date(dateStr).getTime() + 30 * 24 * 60 * 60 * 1000;
+}
+
+function daysAgo(dateStr: string): string {
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return 'today';
+  return days === 1 ? 'yesterday' : `${days} days ago`;
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
