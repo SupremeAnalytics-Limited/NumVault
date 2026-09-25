@@ -13,9 +13,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAlert } from '@/template';
 import DashboardTour, { TourStep } from '@/components/DashboardTour';
 import {
-  AcquisitionParticipant, ReferredCustomer, PitchItem, LeadPayout,
+  AcquisitionParticipant, ReferredCustomer, PitchItem, LeadPayout, PendingReferral,
   getMyParticipant, enrollInProgram, reEnrollInProgram,
-  getMyReferredCustomers, getPitchLibrary,
+  getMyReferredCustomers, getMyPendingReferrals, getPitchLibrary,
   daysRemainingInQualification, getMyPayouts,
   computeCycleProgress, paidPeriodsRemaining,
   currentBlockNumber, daysRemainingInCurrentWindow, closeMyExpiredBlocks,
@@ -149,6 +149,8 @@ export default function AcquisitionProgramScreen() {
   const [reqOpen, setReqOpen] = useState(false);
   const [c2Open, setC2Open] = useState(false);
   const [pitchOpen, setPitchOpen] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [pendingList, setPendingList] = useState<PendingReferral[]>([]);
   const [showWelcome, setShowWelcome] = useState(false);
   const welcomeOpacity = useRef(new Animated.Value(0)).current;
 
@@ -408,6 +410,15 @@ export default function AcquisitionProgramScreen() {
     });
   };
 
+  const togglePending = async () => {
+    await Haptics.selectionAsync();
+    const next = !pendingOpen;
+    setPendingOpen(next);
+    if (next) {
+      try { setPendingList(await getMyPendingReferrals()); } catch { /* keep last list */ }
+    }
+  };
+
   const triggerWelcome = () => {
     setShowWelcome(true);
     Animated.timing(welcomeOpacity, { toValue: 1, duration: 400, useNativeDriver: true }).start();
@@ -532,6 +543,11 @@ export default function AcquisitionProgramScreen() {
   };
 
   const blockNum = participant ? currentBlockNumber(participant) : 1;
+  const pendingCount = referred.filter((r) => !r.validated).length;
+  // Customers needed per day to reach 76 before the current 30-day window ends.
+  const toGo = Math.max(0, 76 - qualCount);
+  const dailyTarget = !needsReEnroll && toGo > 0 && daysLeft > 0 ? Math.ceil(toGo / daysLeft) : 0;
+
   const monthsRemaining = paidPeriodsRemaining(participant ?? { paid_periods_completed: 0 } as AcquisitionParticipant);
   const potentialRemaining = monthsRemaining * 100000;
 
@@ -823,6 +839,11 @@ export default function AcquisitionProgramScreen() {
                           </View>
                         </View>
                       </View>
+                      {dailyTarget ? (
+                        <Text style={styles.dailyTarget}>
+                          <Text style={{ color: GREEN, fontWeight: '600' }}>{dailyTarget} a day</Text> keeps you on track to 76
+                        </Text>
+                      ) : null}
                     </View>
 
                     <View style={styles.cpCard} ref={cpCardRef}>
@@ -938,6 +959,11 @@ export default function AcquisitionProgramScreen() {
                           </View>
                         </View>
                       </View>
+                      {dailyTarget ? (
+                        <Text style={styles.dailyTarget}>
+                          <Text style={{ color: GREEN, fontWeight: '600' }}>{dailyTarget} a day</Text> keeps you on track to 76
+                        </Text>
+                      ) : null}
                     </View>
 
                     <View style={styles.scard}>
@@ -1040,6 +1066,34 @@ export default function AcquisitionProgramScreen() {
                           <Text style={styles.barFtTxt}>76</Text>
                         </View>
                       </View>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* ── SIGNED UP, NOT BOUGHT YET (both tabs) ── */}
+                <View style={styles.scard}>
+                  <TouchableOpacity style={styles.scardHdr} onPress={togglePending} activeOpacity={0.8}>
+                    <View style={styles.scardIcon}>
+                      <MaterialIcons name="person-search" size={16} color={GREEN} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.scardTitle}>Signed up, not bought yet ({pendingCount})</Text>
+                      <Text style={styles.scardSub}>Follow up so they count toward your 76</Text>
+                    </View>
+                    <MaterialIcons name={pendingOpen ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} size={20} color={MUTED} />
+                  </TouchableOpacity>
+                  {pendingOpen ? (
+                    <View style={styles.scardBody}>
+                      {pendingList.length === 0 ? (
+                        <Text style={styles.ruleText}>No one waiting. Everyone who used your code has bought.</Text>
+                      ) : pendingList.map((r) => (
+                        <View key={r.id} style={styles.ruleRow}>
+                          <View style={styles.ruleDot} />
+                          <Text style={styles.ruleText}>
+                            {r.label}  <Text style={{ color: MUTED }}>· signed up {daysAgo(r.signup_at)}</Text>
+                          </Text>
+                        </View>
+                      ))}
                     </View>
                   ) : null}
                 </View>
@@ -1381,6 +1435,12 @@ function isWithin30Days(dateStr: string | null | undefined): boolean {
   return Date.now() < new Date(dateStr).getTime() + 30 * 24 * 60 * 60 * 1000;
 }
 
+function daysAgo(dateStr: string): string {
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return 'today';
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const BG = '#0a0d0a';
@@ -1497,6 +1557,7 @@ const styles = StyleSheet.create({
   topCardLabel: { fontSize: 10, color: MUTED2, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 },
   topCardHeadline: { fontSize: 22, fontWeight: '700', color: TEXT, lineHeight: 26, marginBottom: 6 },
   topCardSub: { fontSize: 12, color: MUTED, lineHeight: 18 },
+  dailyTarget: { fontSize: 12, color: MUTED, textAlign: 'center', marginTop: 10 },
   topCardBig: { fontSize: 28, fontWeight: '700', color: GREEN, lineHeight: 32, marginBottom: 4 },
   topCardBigSub: { fontSize: 11, color: MUTED },
   topCardDivider: { height: 1, backgroundColor: BORDER, marginBottom: 14 },

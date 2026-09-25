@@ -180,6 +180,19 @@ export async function getMyReferredCustomers(
   return data || [];
 }
 
+export interface PendingReferral {
+  id: string;
+  signup_at: string;
+  label: string;
+}
+
+// Signed up with the lead's code but hasn't bought yet — for follow-ups.
+export async function getMyPendingReferrals(): Promise<PendingReferral[]> {
+  const { data, error } = await supabase.rpc('get_my_pending_referrals');
+  if (error) throw new Error(error.message);
+  return (data || []) as PendingReferral[];
+}
+
 export async function getMyPayouts(participantId: string): Promise<LeadPayout[]> {
   const { data, error } = await supabase
     .from('lead_payouts')
