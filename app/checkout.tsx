@@ -12,14 +12,13 @@ import { useAuth, useAlert } from '@/template';
 import { useOrders } from '@/hooks/useOrders';
 import { useWallet } from '@/hooks/useWallet';
 import { initializePayment, purchaseNumber } from '@/services/paystackService';
-import { getSetting } from '@/services/settingsService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 import {
   trackCheckoutOpened, trackPurchaseInitiated, trackPaymentSucceeded,
   trackPaymentFailed, trackPurchaseSucceeded, trackPurchaseFailed,
   trackCheckoutCompleted, captureError,
 } from '@/services/sentryService';
-import { PLATFORM_ICONS, paystackTransferFee } from '@/constants/config';
+import { PLATFORM_ICONS } from '@/constants/config';
 
 export default function CheckoutScreen() {
   const insets = useSafeAreaInsets();
@@ -40,7 +39,6 @@ export default function CheckoutScreen() {
   }>();
 
   const [balanceReady, setBalanceReady] = useState(false);
-  const [nearInstantTransferEnabled, setNearInstantTransferEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [webViewUrl, setWebViewUrl] = useState<string | null>(null);
   const [paystackRef, setPaystackRef] = useState<string | null>(null);
@@ -54,26 +52,13 @@ export default function CheckoutScreen() {
     refreshProfile().finally(() => setBalanceReady(true));
   }, []);
 
-  // near_instant_transfer_enabled adds a transfer-fee line the customer covers
-  // (purchase-number enforces this server-side too — this is what makes the
-  // charge/debit actually match what the server will require, so legitimate
-  // purchases don't get rejected as underpaid once the toggle is on).
-  useEffect(() => {
-    getSetting<boolean>('near_instant_transfer_enabled', false)
-      .then(setNearInstantTransferEnabled)
-      .catch(() => setNearInstantTransferEnabled(false));
-  }, []);
-
   const basePrice = parseFloat(params.price || '0');
   // Wholesale cost from Socially.ng — the exact amount Socially.ng must receive.
   // Falls back to price/MARKUP (1.4×) if not supplied (defensive).
   const wholesalePrice = params.wholesale_price
     ? parseFloat(params.wholesale_price)
     : basePrice / 1.4;
-  const transferFeeAddon = nearInstantTransferEnabled ? paystackTransferFee(wholesalePrice) : 0;
-  // price is what's actually charged/debited and shown as the total — the
-  // ₦1,500 margin (baked into basePrice) is never reduced by this add-on.
-  const price = basePrice + transferFeeAddon;
+  const price = basePrice;
 
   const parsePurchaseError = (rawMessage: string): { message: string; hint?: string } => {
     const msg = rawMessage.replace(/^Socially:\s*/i, '').trim();

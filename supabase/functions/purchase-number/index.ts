@@ -1,8 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
 import { getSetting } from '../_shared/settings.ts';
-import { getOrCreateSociallyRecipient } from '../_shared/socially-recipient.ts';
-import { paystackTransferFee } from '../_shared/paystack-fees.ts';
 
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
@@ -73,7 +71,7 @@ Deno.serve(async (req: Request) => {
     // every number sale immediately once saved. Falls back to ₦1,500.
     const FLAT_ACQUISITION_FEE = await getSetting(supabaseAdmin, 'flat_acquisition_fee', 1500);
     let expectedRetail: number | null = null;
-    let wholesaleCost: number | null = null; // captured for the near-instant transfer, below
+    let wholesaleCost: number | null = null; // saved on the order row for reporting/top-up demand calc
     try {
       const socially_url = Deno.env.get('SUPABASE_URL') ?? '';
       const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -133,13 +131,10 @@ Deno.serve(async (req: Request) => {
 
     // ── Required amount: server-authoritative, never client-trusted ─────────
     // expectedRetail already guarantees the ₦1,500 margin (wholesale + flat
-    // fee, verified above). When near_instant_transfer_enabled is on, the
-    // customer also covers the exact Paystack transfer fee for sending
-    // wholesale to Socially.ng — added here, not absorbed out of margin.
-    // This is the one number both paths below are checked/charged against;
-    // client-sent amount_paid is never trusted as the actual price.
-    const nearInstantTransferEnabled = await getSetting(supabaseAdmin, 'near_instant_transfer_enabled', false);
-    const requiredAmount = expectedRetail! + (nearInstantTransferEnabled ? paystackTransferFee(wholesaleCost!) : 0);
+    // fee, verified above). This is the one number both paths below are
+    // checked/charged against; client-sent amount_paid is never trusted as
+    // the actual price.
+    const requiredAmount = expectedRetail!;
     // ──────────────────────────────────────────────────────────────────────
 
     if (!use_wallet && !paystack_reference) {
@@ -201,9 +196,9 @@ Deno.serve(async (req: Request) => {
       // ── WALLET PATH ──────────────────────────────────────────────────────────
       // paidAmount is the server-computed requiredAmount, not the client-sent
       // amount_paid — the wallet debit must always be exactly wholesale +
-      // ₦1,500 margin (+ transfer fee when applicable), never whatever the
-      // client happens to send. A large mismatch is logged as a signal of a
-      // stale/buggy client, but the server number is what's actually charged.
+      // ₦1,500 margin, never whatever the client happens to send. A large
+      // mismatch is logged as a signal of a stale/buggy client, but the
+      // server number is what's actually charged.
       paidAmount = requiredAmount;
       if (Number(amount_paid) && Math.abs(Number(amount_paid) - paidAmount) > 50) {
         console.warn(`Wallet purchase: client sent amount_paid=₦${amount_paid}, server charged requiredAmount=₦${paidAmount} (ignoring client value)`);
@@ -295,8 +290,8 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Both Paystack routes: the amount actually paid must cover the price,
-      // margin and (when applicable) transfer fee included — see requiredAmount above.
+      // Both Paystack routes: the amount actually paid must cover the price
+      // and margin — see requiredAmount above.
       if (paidAmount < requiredAmount - 50) {
         console.warn(`Paystack ref ${paystack_reference} underpaid: paid ₦${paidAmount}, required ₦${requiredAmount}`);
         return new Response(JSON.stringify({
@@ -447,6 +442,7 @@ Deno.serve(async (req: Request) => {
         socially_order_id: sociallyReference,
         order_reference: sociallyReference,
         paystack_reference: paystack_reference || null,
+        wholesale_cost: wholesaleCost,
       })
       .select()
       .single();
@@ -482,45 +478,6 @@ Deno.serve(async (req: Request) => {
         description: `${project_name || project_code} number - ${country_name || country_code}`,
       });
     }
-
-    // ── Near-instant transfer: pay Socially.ng the exact wholesale cost ──────
-    // Admin toggle (app_settings.near_instant_transfer_enabled). When on, this
-    // purchase's wholesale cost is sent to Socially.ng right now via a direct
-    // Paystack transfer, instead of relying on the next-day settlement split.
-    // Awaited (not fire-and-forget) so a dropped connection can't leave a real
-    // money transfer unaccounted for — wrapped in try/catch so a transfer
-    // failure only logs, it never fails a sale the customer already received.
-    // The order above is already committed either way.
-    if (wholesaleCost != null && wholesaleCost > 0) {
-      if (nearInstantTransferEnabled) {
-        try {
-          const secretKey = Deno.env.get('PAYSTACK_SECRET_KEY') ?? '';
-          const recipientCode = await getOrCreateSociallyRecipient(secretKey);
-          const fee = paystackTransferFee(wholesaleCost);
-          const transferRef = `nvxfer_${sociallyReference}`;
-          const transferRes = await fetch(`${PAYSTACK_BASE}/transfer`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              source: 'balance',
-              amount: Math.round(wholesaleCost * 100),
-              recipient: recipientCode,
-              reason: `NumVault wholesale — ${sociallyReference}`,
-              reference: transferRef,
-            }),
-          });
-          const transferData = await transferRes.json();
-          if (!transferRes.ok || !transferData.status) {
-            console.error(`Near-instant transfer FAILED for ${sociallyReference}: ₦${wholesaleCost} (Paystack fee ₦${fee}) —`, JSON.stringify(transferData));
-          } else {
-            console.log(`Near-instant transfer sent: ₦${wholesaleCost} → Socially.ng (Paystack fee ₦${fee}, absorbed by NumVault) for ${sociallyReference}, ref=${transferRef}`);
-          }
-        } catch (transferErr) {
-          console.error(`Near-instant transfer EXCEPTION for ${sociallyReference}:`, transferErr);
-        }
-      }
-    }
-    // ─────────────────────────────────────────────────────────────────────────
 
     return new Response(JSON.stringify({
       data: {

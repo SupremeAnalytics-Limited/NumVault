@@ -164,8 +164,8 @@ export default function AdminDashboardScreen() {
   const [selectedPayoutForReject, setSelectedPayoutForReject] = useState<ReviewPayout | null>(null);
 
   // ── Settings tab ──────────────────────────────────────────────────────────
-  const [nearInstantTransfer, setNearInstantTransfer] = useState(false);
-  const [transferToggleSaving, setTransferToggleSaving] = useState(false);
+  const [scaleMode, setScaleMode] = useState(false);
+  const [scaleModeToggleSaving, setScaleModeToggleSaving] = useState(false);
   const [tourForceEverySession, setTourForceEverySession] = useState(false);
   const [tourToggleSaving, setTourToggleSaving] = useState(false);
   const [appOnboardingForceEverySession, setAppOnboardingForceEverySession] = useState(true);
@@ -183,15 +183,15 @@ export default function AdminDashboardScreen() {
   const loadSettings = useCallback(async () => {
     setJobAdLoading(true);
     try {
-      const [enabled, steps, margin, tourForce, appOnboardingForce, acqLandingForce] = await Promise.all([
-        getSetting<boolean>('near_instant_transfer_enabled', false),
+      const [scale, steps, margin, tourForce, appOnboardingForce, acqLandingForce] = await Promise.all([
+        getSetting<boolean>('scale_mode_enabled', false),
         getSetting<JobAdStep[] | null>('job_ad_content', null),
         getSetting<number>('flat_acquisition_fee', 1500),
         getSetting<boolean>('dashboard_tour_force_every_session', false),
         getSetting<boolean>('app_onboarding_force_every_session', true),
         getSetting<boolean>('acquisition_landing_force_every_session', true),
       ]);
-      setNearInstantTransfer(!!enabled);
+      setScaleMode(!!scale);
       setJobAdSteps(steps ?? DEFAULT_JOB_AD_STEPS);
       setJobAdDirty(false);
       setMarginValue(String(margin));
@@ -209,18 +209,18 @@ export default function AdminDashboardScreen() {
   useEffect(() => { checkAndLoad(); }, []);
   useEffect(() => { if (activeTab === 'settings' && jobAdSteps === null) loadSettings(); }, [activeTab, jobAdSteps, loadSettings]);
 
-  const toggleNearInstantTransfer = async (value: boolean) => {
-    setTransferToggleSaving(true);
-    const previous = nearInstantTransfer;
-    setNearInstantTransfer(value); // optimistic
+  const toggleScaleMode = async (value: boolean) => {
+    setScaleModeToggleSaving(true);
+    const previous = scaleMode;
+    setScaleMode(value); // optimistic
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      await setSetting('near_instant_transfer_enabled', value);
+      await setSetting('scale_mode_enabled', value);
     } catch (e: any) {
-      setNearInstantTransfer(previous);
-      showAlert('Could not save', e.message || 'Failed to update the transfer mode.');
+      setScaleMode(previous);
+      showAlert('Could not save', e.message || 'Failed to update scale mode.');
     } finally {
-      setTransferToggleSaving(false);
+      setScaleModeToggleSaving(false);
     }
   };
 
@@ -1035,26 +1035,26 @@ export default function AdminDashboardScreen() {
             <View style={settingsStyles.card}>
               <View style={settingsStyles.rowBetween}>
                 <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={settingsStyles.cardTitle}>Near-instant Socially.ng transfers</Text>
+                  <Text style={settingsStyles.cardTitle}>Scale mode</Text>
                   <Text style={settingsStyles.cardSub}>
-                    {nearInstantTransfer
-                      ? 'ON — every number purchase pays Socially.ng its exact wholesale cost via a direct Paystack transfer, right away. No settlement split.'
-                      : 'OFF — using the current T+1 settlement split. Wholesale account depreciates at purchase time and is replenished the next day; margin is still kept immediately either way.'}
+                    {scaleMode
+                      ? 'ON — uncapped, batched Socially.ng top-ups that grow with demand.'
+                      : 'OFF — using the standard top-up: ₦40,000–₦200,000 based on the last hour of sales.'}
                   </Text>
                 </View>
-                {transferToggleSaving ? (
+                {scaleModeToggleSaving ? (
                   <ActivityIndicator color={GREEN} />
                 ) : (
                   <Switch
-                    value={nearInstantTransfer}
-                    onValueChange={toggleNearInstantTransfer}
+                    value={scaleMode}
+                    onValueChange={toggleScaleMode}
                     trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
-                    thumbColor={nearInstantTransfer ? GREEN : MUTED}
+                    thumbColor={scaleMode ? GREEN : MUTED}
                   />
                 )}
               </View>
               <Text style={settingsStyles.hint}>
-                Turn this on once Paystack has approved the business account and transfers are confirmed working. Turning it off at any time reverts immediately to the split.
+                Uncapped, batched, demand-based top-ups that grow with demand.
               </Text>
             </View>
 

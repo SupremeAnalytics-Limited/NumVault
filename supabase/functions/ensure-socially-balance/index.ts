@@ -11,6 +11,11 @@ import { getSetting } from '../_shared/settings.ts';
  * wholesale spend × DEMAND_MULTIPLIER, clamped to MIN/MAX) and never touches
  * money owed or accruing to ambassador leads.
  *
+ * When app_settings.scale_mode_enabled is true, the classic threshold/demand
+ * formula above is replaced by an uncapped, 24h-demand-based cushion target
+ * (see SCALE MODE below) — everything else (rate limit, pending-row lock,
+ * Paystack balance + payout reserve check) stays exactly as it is today.
+ *
  * ── Tuneable constants ────────────────────────────────────────────────────
  */
 const LOW_THRESHOLD = 40_000;           // ₦40,000 — trigger a top-up below this
@@ -25,6 +30,17 @@ const LEAD_MONTHLY_PAY = 100_000;       // ₦100,000 per 76 customers
 const LEAD_MONTHLY_TARGET = 76;
 const MIN_MINUTES_BETWEEN_TOPUPS = 5;   // Skip if a top-up was inserted within this window
 const CRITICAL_BALANCE = 15_000;        // ₦15,000 — always alert admin at or below this
+
+// ── Scale mode (app_settings.scale_mode_enabled) ────────────────────────────
+// Uncapped, demand-based top-ups for higher volume: keeps a 24h-spend-based
+// cushion instead of the fixed hourly-demand formula above, and batches a
+// top-up across multiple Paystack transfers when it exceeds a single
+// transfer's practical size. Off by default — classic behavior (constants
+// above) is unchanged when this is off.
+const SCALE_MODE_TARGET_FLOOR = 107_000;   // ₦107,000 — minimum cushion even at zero recent demand
+const SCALE_MODE_MIN_TOPUP = 10_000;       // ₦10,000 — smallest scale-mode transfer worth sending
+const SCALE_MODE_CHUNK_MAX = 10_000_000;   // ₦10,000,000 — max per single Paystack transfer
+const SCALE_MODE_BULK_BATCH_SIZE = 100;    // Paystack /transfer/bulk max transfers per request
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ADMIN_EMAIL = 'oluwaferanmionabanjo@gmail.com';
@@ -64,6 +80,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const FLAT_ACQUISITION_FEE = await getSetting(admin, 'flat_acquisition_fee', DEFAULT_FLAT_ACQUISITION_FEE);
+    const scaleModeEnabled = await getSetting(admin, 'scale_mode_enabled', false);
 
     // ── 0. Expire stale pending auto-topup rows (older than 15 min) ─────────────
     const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
@@ -161,7 +178,34 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── 2. Nothing to do if balance is healthy ────────────────────────────────
-    if (sociallyBalance > LOW_THRESHOLD) {
+    let scaleModeTarget = 0;
+    if (scaleModeEnabled) {
+      // SCALE MODE: target = max(floor, wholesale spend in the last 24h).
+      const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: recentOrders24h } = await admin
+        .from('orders')
+        .select('amount_paid, wholesale_cost')
+        .in('status', ['pending', 'completed'])
+        .gte('created_at', since24h);
+      const wholesaleSpend24h = (recentOrders24h || []).reduce((s: number, o: any) => {
+        const wc = o.wholesale_cost != null
+          ? Number(o.wholesale_cost)
+          : Math.max(0, Number(o.amount_paid) - FLAT_ACQUISITION_FEE);
+        return s + wc;
+      }, 0);
+      scaleModeTarget = Math.max(SCALE_MODE_TARGET_FLOOR, wholesaleSpend24h);
+      console.log(`Scale mode target: ₦${scaleModeTarget} (24h wholesale spend ₦${wholesaleSpend24h}, floor ₦${SCALE_MODE_TARGET_FLOOR})`);
+
+      if (sociallyBalance >= scaleModeTarget) {
+        console.log(`Scale mode: balance ₦${sociallyBalance} >= target ₦${scaleModeTarget}. No top-up needed.`);
+        return new Response(JSON.stringify({
+          action: 'none',
+          reason: 'balance_above_target',
+          socially_balance: sociallyBalance,
+          target: scaleModeTarget,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    } else if (sociallyBalance > LOW_THRESHOLD) {
       console.log(`Balance ₦${sociallyBalance} > threshold ₦${LOW_THRESHOLD}. No top-up needed.`);
       return new Response(JSON.stringify({
         action: 'none',
@@ -254,25 +298,10 @@ Deno.serve(async (req: Request) => {
     const paystackFree = paystackAvailable - payoutReserve;
     console.log(`Paystack free (after reserve): ₦${paystackFree}`);
 
-    // Demand: wholesale cost of numbers sold in the last hour.
-    const demandSince = new Date(Date.now() - DEMAND_WINDOW_MINUTES * 60 * 1000).toISOString();
-    const { data: recentOrders } = await admin
-      .from('orders')
-      .select('amount_paid')
-      .gte('created_at', demandSince);
-    const recentWholesale = (recentOrders || []).reduce(
-      (s: number, o: any) => s + Math.max(0, Number(o.amount_paid) - FLAT_ACQUISITION_FEE), 0,
-    );
-    const plannedAmount = Math.min(
-      MAX_TOPUP,
-      Math.max(MIN_TOPUP, Math.ceil((recentWholesale * DEMAND_MULTIPLIER) / 1000) * 1000),
-    );
-    const topupAmount = Math.min(plannedAmount, Math.floor(paystackFree / 1000) * 1000);
-    const isPartial = topupAmount < plannedAmount;
-    console.log(`Demand: ₦${recentWholesale} wholesale in last ${DEMAND_WINDOW_MINUTES} min → planned ₦${plannedAmount}, sending ₦${topupAmount}`);
-
-    if (topupAmount < MIN_TOPUP) {
-      const msg = `Socially.ng balance is ₦${sociallyBalance.toLocaleString()} and Paystack has less than ₦${MIN_TOPUP.toLocaleString()} free to top it up. Paystack available: ₦${paystackAvailable.toLocaleString()}, reserved for ambassador payouts: ₦${payoutReserve.toLocaleString()}, free: ₦${paystackFree.toLocaleString()}.`;
+    // Shared "cannot top up" skip path — used by both the classic and
+    // scale-mode branches below.
+    const skipInsufficientPaystack = async (minRequired: number, plannedAmt: number, extra?: string) => {
+      const msg = `Socially.ng balance is ₦${sociallyBalance.toLocaleString()}${extra ?? ''} and Paystack has less than ₦${minRequired.toLocaleString()} free to top it up. Paystack available: ₦${paystackAvailable.toLocaleString()}, reserved for ambassador payouts: ₦${payoutReserve.toLocaleString()}, free: ₦${paystackFree.toLocaleString()}.`;
       console.warn(msg);
       const thirtyMinAgoC = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       const { data: recentCannotTopup } = await admin
@@ -303,8 +332,61 @@ Deno.serve(async (req: Request) => {
         paystack_available: paystackAvailable,
         payout_reserve: payoutReserve,
         paystack_free: paystackFree,
-        planned_amount: plannedAmount,
+        planned_amount: plannedAmt,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    };
+
+    let topupAmount: number;
+    let plannedAmount: number;
+    let isPartial: boolean;
+
+    if (scaleModeEnabled) {
+      // SCALE MODE: top up to the 24h-demand-based target computed above,
+      // uncapped (no MAX_TOPUP), gated only by what Paystack actually has free.
+      const needed = Math.ceil((scaleModeTarget - sociallyBalance) / 1000) * 1000;
+      plannedAmount = needed;
+      if (needed < SCALE_MODE_MIN_TOPUP) {
+        console.log(`Scale mode: needed ₦${needed} is below the minimum ₦${SCALE_MODE_MIN_TOPUP}. No top-up.`);
+        return new Response(JSON.stringify({
+          action: 'none',
+          reason: 'needed_below_minimum',
+          socially_balance: sociallyBalance,
+          target: scaleModeTarget,
+          needed,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      topupAmount = Math.min(needed, Math.floor(paystackFree / 1000) * 1000);
+      isPartial = topupAmount < needed;
+      console.log(`Scale mode: target ₦${scaleModeTarget}, balance ₦${sociallyBalance}, needed ₦${needed} → sending ₦${topupAmount}`);
+
+      if (paystackFree < SCALE_MODE_MIN_TOPUP) {
+        return await skipInsufficientPaystack(
+          SCALE_MODE_MIN_TOPUP,
+          plannedAmount,
+          ` (target ₦${scaleModeTarget.toLocaleString()})`,
+        );
+      }
+    } else {
+      // Demand: wholesale cost of numbers sold in the last hour.
+      const demandSince = new Date(Date.now() - DEMAND_WINDOW_MINUTES * 60 * 1000).toISOString();
+      const { data: recentOrders } = await admin
+        .from('orders')
+        .select('amount_paid')
+        .gte('created_at', demandSince);
+      const recentWholesale = (recentOrders || []).reduce(
+        (s: number, o: any) => s + Math.max(0, Number(o.amount_paid) - FLAT_ACQUISITION_FEE), 0,
+      );
+      plannedAmount = Math.min(
+        MAX_TOPUP,
+        Math.max(MIN_TOPUP, Math.ceil((recentWholesale * DEMAND_MULTIPLIER) / 1000) * 1000),
+      );
+      topupAmount = Math.min(plannedAmount, Math.floor(paystackFree / 1000) * 1000);
+      isPartial = topupAmount < plannedAmount;
+      console.log(`Demand: ₦${recentWholesale} wholesale in last ${DEMAND_WINDOW_MINUTES} min → planned ₦${plannedAmount}, sending ₦${topupAmount}`);
+
+      if (topupAmount < MIN_TOPUP) {
+        return await skipInsufficientPaystack(MIN_TOPUP, plannedAmount);
+      }
     }
 
     // ── 5. Insert lock row (pending) — partial unique index prevents duplicates ─
@@ -368,148 +450,284 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ── 7. Fire Paystack transfer ─────────────────────────────────────────────
-    const amountKobo = Math.round(topupAmount * 100);
-    console.log(`Firing Paystack transfer: ₦${topupAmount} → ${SOCIALLY_ACCOUNT_NUMBER} (ref: ${ref})`);
+    // ── 7. Fire Paystack transfer(s) ──────────────────────────────────────────
+    if (topupAmount <= SCALE_MODE_CHUNK_MAX) {
+      // Single transfer — same for both modes (classic never exceeds
+      // MAX_TOPUP=₦200,000, well under the chunk ceiling).
+      const amountKobo = Math.round(topupAmount * 100);
+      console.log(`Firing Paystack transfer: ₦${topupAmount} → ${SOCIALLY_ACCOUNT_NUMBER} (ref: ${ref})`);
 
-    let psTransferRes: Response;
-    let psTransferData: any;
+      let psTransferRes: Response;
+      let psTransferData: any;
 
-    try {
-      psTransferRes = await fetch(`${PAYSTACK_BASE}/transfer`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${paystackSecret}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          source: 'balance',
-          amount: amountKobo,
-          recipient: recipientCode,
-          reason: 'NumVault auto top-up — Socially.ng low balance',
-          reference: ref,
-        }),
-      });
-      psTransferData = await psTransferRes.json();
-    } catch (fetchErr) {
-      const fetchErrMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-      console.error('Paystack transfer fetch threw:', fetchErrMsg);
-      await admin.from('socially_transfers').update({
-        status: 'failed',
-        error_message: `Transfer request failed: ${fetchErrMsg}`,
-        recipient_code: recipientCode,
-      }).eq('order_reference', ref);
-      await pushAdmin(
-        admin,
-        '🚨 Socially.ng auto top-up FAILED',
-        `Paystack transfer request threw an error: ${fetchErrMsg}. Socially balance was ₦${sociallyBalance.toLocaleString()}.`,
-        { type: 'socially_topup_fetch_threw', error: fetchErrMsg, socially_balance: sociallyBalance },
-      ).catch(() => {});
-      return new Response(JSON.stringify({
-        action: 'error',
-        reason: 'transfer_fetch_threw',
-        error: fetchErrMsg,
-        socially_balance: sociallyBalance,
-      }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
+      try {
+        psTransferRes = await fetch(`${PAYSTACK_BASE}/transfer`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${paystackSecret}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            source: 'balance',
+            amount: amountKobo,
+            recipient: recipientCode,
+            reason: 'NumVault auto top-up — Socially.ng low balance',
+            reference: ref,
+          }),
+        });
+        psTransferData = await psTransferRes.json();
+      } catch (fetchErr) {
+        const fetchErrMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        console.error('Paystack transfer fetch threw:', fetchErrMsg);
+        await admin.from('socially_transfers').update({
+          status: 'failed',
+          error_message: `Transfer request failed: ${fetchErrMsg}`,
+          recipient_code: recipientCode,
+        }).eq('order_reference', ref);
+        await pushAdmin(
+          admin,
+          '🚨 Socially.ng auto top-up FAILED',
+          `Paystack transfer request threw an error: ${fetchErrMsg}. Socially balance was ₦${sociallyBalance.toLocaleString()}.`,
+          { type: 'socially_topup_fetch_threw', error: fetchErrMsg, socially_balance: sociallyBalance },
+        ).catch(() => {});
+        return new Response(JSON.stringify({
+          action: 'error',
+          reason: 'transfer_fetch_threw',
+          error: fetchErrMsg,
+          socially_balance: sociallyBalance,
+        }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
 
-    console.log('Paystack transfer response:', JSON.stringify(psTransferData));
+      console.log('Paystack transfer response:', JSON.stringify(psTransferData));
 
-    // OTP-gate
-    if (psTransferData.data?.status === 'otp') {
-      const otpMsg = 'Transfer OTP is turned on in Paystack. Disable it in Paystack Settings → Transfers → OTP, then retry.';
-      await admin.from('socially_transfers').update({
-        status: 'failed',
-        error_message: otpMsg,
-      }).eq('order_reference', ref);
-      await pushAdmin(
-        admin, '🚨 Socially.ng auto top-up blocked by Paystack OTP',
-        otpMsg,
-        { type: 'socially_topup_otp_required' },
-      ).catch(() => {});
-      return new Response(JSON.stringify({ action: 'error', reason: 'paystack_otp', error: otpMsg }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+      // OTP-gate
+      if (psTransferData.data?.status === 'otp') {
+        const otpMsg = 'Transfer OTP is turned on in Paystack. Disable it in Paystack Settings → Transfers → OTP, then retry.';
+        await admin.from('socially_transfers').update({
+          status: 'failed',
+          error_message: otpMsg,
+        }).eq('order_reference', ref);
+        await pushAdmin(
+          admin, '🚨 Socially.ng auto top-up blocked by Paystack OTP',
+          otpMsg,
+          { type: 'socially_topup_otp_required' },
+        ).catch(() => {});
+        return new Response(JSON.stringify({ action: 'error', reason: 'paystack_otp', error: otpMsg }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
 
-    if (psTransferRes!.ok && psTransferData.status) {
-      const transferCode = psTransferData.data?.transfer_code ?? null;
-      await admin.from('socially_transfers').update({
-        status: 'success',
-        paystack_transfer_reference: transferCode ?? ref,
-        recipient_code: recipientCode,
-        error_message: null,
-      }).eq('order_reference', ref);
-
-      console.log(`Top-up succeeded. Transfer code: ${transferCode}`);
-      if (isPartial) await alertPartial();
-      return new Response(JSON.stringify({
-        action: 'topped_up',
-        amount: topupAmount,
-        transfer_code: transferCode,
-        reference: ref,
-        socially_balance_before: sociallyBalance,
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // Transfer failed — verify before giving up
-    const verifyRes = await fetch(`${PAYSTACK_BASE}/transfer/verify/${ref}`, {
-      headers: { Authorization: `Bearer ${paystackSecret}` },
-    });
-    const verifyData = await verifyRes.json();
-    console.log('Paystack transfer verify:', JSON.stringify(verifyData));
-
-    if (verifyRes.ok && verifyData.status && verifyData.data) {
-      const vs = verifyData.data.status ?? '';
-      const vc = verifyData.data.transfer_code ?? null;
-      if (vs === 'success') {
+      if (psTransferRes!.ok && psTransferData.status) {
+        const transferCode = psTransferData.data?.transfer_code ?? null;
         await admin.from('socially_transfers').update({
           status: 'success',
-          paystack_transfer_reference: vc ?? ref,
+          paystack_transfer_reference: transferCode ?? ref,
           recipient_code: recipientCode,
           error_message: null,
         }).eq('order_reference', ref);
+
+        console.log(`Top-up succeeded. Transfer code: ${transferCode}`);
         if (isPartial) await alertPartial();
         return new Response(JSON.stringify({
           action: 'topped_up',
           amount: topupAmount,
-          transfer_code: vc,
+          transfer_code: transferCode,
           reference: ref,
-          verified_after_error: true,
+          socially_balance_before: sociallyBalance,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
-      if (vs === 'pending' || vs === 'processing') {
-        // Leave as pending; will resolve via webhook or next check
-        return new Response(JSON.stringify({
-          action: 'pending',
-          amount: topupAmount,
-          transfer_code: vc,
-          reference: ref,
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+      // Transfer failed — verify before giving up
+      const verifyRes = await fetch(`${PAYSTACK_BASE}/transfer/verify/${ref}`, {
+        headers: { Authorization: `Bearer ${paystackSecret}` },
+      });
+      const verifyData = await verifyRes.json();
+      console.log('Paystack transfer verify:', JSON.stringify(verifyData));
+
+      if (verifyRes.ok && verifyData.status && verifyData.data) {
+        const vs = verifyData.data.status ?? '';
+        const vc = verifyData.data.transfer_code ?? null;
+        if (vs === 'success') {
+          await admin.from('socially_transfers').update({
+            status: 'success',
+            paystack_transfer_reference: vc ?? ref,
+            recipient_code: recipientCode,
+            error_message: null,
+          }).eq('order_reference', ref);
+          if (isPartial) await alertPartial();
+          return new Response(JSON.stringify({
+            action: 'topped_up',
+            amount: topupAmount,
+            transfer_code: vc,
+            reference: ref,
+            verified_after_error: true,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        if (vs === 'pending' || vs === 'processing') {
+          // Leave as pending; will resolve via webhook or next check
+          return new Response(JSON.stringify({
+            action: 'pending',
+            amount: topupAmount,
+            transfer_code: vc,
+            reference: ref,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+
+      // Genuinely failed
+      const failReason = psTransferData.message || psTransferData.data?.message || 'Paystack transfer failed';
+      await admin.from('socially_transfers').update({
+        status: 'failed',
+        error_message: `Paystack: ${failReason}`,
+        recipient_code: recipientCode,
+      }).eq('order_reference', ref);
+
+      await pushAdmin(
+        admin,
+        '🚨 Socially.ng auto top-up FAILED',
+        `Paystack transfer of ₦${topupAmount.toLocaleString()} to Socially.ng failed. Reason: ${failReason}. Socially balance was ₦${sociallyBalance.toLocaleString()}.`,
+        { type: 'socially_topup_transfer_failed', reason: failReason, socially_balance: sociallyBalance },
+      ).catch(() => {});
+
+      return new Response(JSON.stringify({
+        action: 'error',
+        reason: 'transfer_failed',
+        error: failReason,
+        socially_balance: sociallyBalance,
+      }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ── 7b. Scale mode batch: split into ≤₦10,000,000 chunks, send via
+    // Paystack /transfer/bulk in groups of ≤100. Only reachable in scale
+    // mode — classic mode never exceeds MAX_TOPUP=₦200,000.
+    const chunkAmounts: number[] = [];
+    let remaining = topupAmount;
+    while (remaining > 0) {
+      const chunk = Math.min(SCALE_MODE_CHUNK_MAX, remaining);
+      chunkAmounts.push(chunk);
+      remaining -= chunk;
+    }
+    console.log(`Scale mode bulk: ₦${topupAmount} split into ${chunkAmounts.length} chunk(s): ${chunkAmounts.join(', ')}`);
+
+    const chunkRows = chunkAmounts.map((amount, i) => ({
+      reference: `${ref}_chunk${i + 1}`,
+      amount,
+    }));
+
+    // Pre-insert one 'pending' row per chunk — not subject to the
+    // low_balance_auto unique index (different trigger_reason), so these can
+    // coexist freely alongside the single lock row inserted in step 5.
+    await admin.from('socially_transfers').insert(
+      chunkRows.map((c) => ({
+        order_reference: c.reference,
+        paystack_transfer_reference: c.reference,
+        amount_transferred: c.amount,
+        status: 'pending',
+        trigger_reason: 'scale_mode_batch',
+        recipient_code: recipientCode,
+      })),
+    );
+
+    let anyFailed = false;
+    let anySucceeded = false;
+    const failureDetails: string[] = [];
+
+    for (let i = 0; i < chunkRows.length; i += SCALE_MODE_BULK_BATCH_SIZE) {
+      const batch = chunkRows.slice(i, i + SCALE_MODE_BULK_BATCH_SIZE);
+      const batchNum = Math.floor(i / SCALE_MODE_BULK_BATCH_SIZE) + 1;
+      let bulkRes: Response;
+      let bulkData: any;
+      try {
+        bulkRes = await fetch(`${PAYSTACK_BASE}/transfer/bulk`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            currency: 'NGN',
+            source: 'balance',
+            transfers: batch.map((c) => ({
+              amount: Math.round(c.amount * 100),
+              recipient: recipientCode,
+              reference: c.reference,
+              reason: 'NumVault scale-mode top-up — Socially.ng low balance',
+            })),
+          }),
+        });
+        bulkData = await bulkRes.json();
+      } catch (fetchErr) {
+        const fetchErrMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        console.error(`Bulk transfer batch ${batchNum} fetch threw:`, fetchErrMsg);
+        anyFailed = true;
+        failureDetails.push(`batch ${batchNum}: request failed — ${fetchErrMsg}`);
+        await admin.from('socially_transfers')
+          .update({ status: 'failed', error_message: `Bulk transfer request failed: ${fetchErrMsg}` })
+          .in('order_reference', batch.map((c) => c.reference));
+        continue;
+      }
+      console.log(`Bulk transfer batch ${batchNum} response:`, JSON.stringify(bulkData));
+
+      if (!bulkRes!.ok || !bulkData.status) {
+        anyFailed = true;
+        const failMsg = bulkData.message || 'Bulk transfer request rejected';
+        failureDetails.push(`batch ${batchNum}: ${failMsg}`);
+        await admin.from('socially_transfers')
+          .update({ status: 'failed', error_message: `Paystack: ${failMsg}` })
+          .in('order_reference', batch.map((c) => c.reference));
+        continue;
+      }
+
+      const items: any[] = Array.isArray(bulkData.data) ? bulkData.data : [];
+      for (const c of batch) {
+        const item = items.find((it) => it.reference === c.reference);
+        const itemStatus = item?.status;
+        if (itemStatus === 'success' || itemStatus === 'pending' || itemStatus === 'processing') {
+          anySucceeded = true;
+          await admin.from('socially_transfers')
+            .update({
+              status: itemStatus === 'success' ? 'success' : 'pending',
+              paystack_transfer_reference: item?.transfer_code ?? c.reference,
+              error_message: null,
+            })
+            .eq('order_reference', c.reference);
+        } else {
+          anyFailed = true;
+          const itemMsg = item ? `status=${itemStatus}` : 'not found in response';
+          failureDetails.push(`${c.reference}: ${itemMsg}`);
+          await admin.from('socially_transfers')
+            .update({ status: 'failed', error_message: `Paystack: ${itemMsg}` })
+            .eq('order_reference', c.reference);
+        }
       }
     }
 
-    // Genuinely failed
-    const failReason = psTransferData.message || psTransferData.data?.message || 'Paystack transfer failed';
+    // Roll the outcome up onto the original lock row from step 5.
     await admin.from('socially_transfers').update({
-      status: 'failed',
-      error_message: `Paystack: ${failReason}`,
+      status: anyFailed ? (anySucceeded ? 'success' : 'failed') : 'success',
+      error_message: anyFailed
+        ? `${failureDetails.length} of ${chunkAmounts.length} chunk(s) failed: ${failureDetails.join('; ')}`
+        : null,
       recipient_code: recipientCode,
     }).eq('order_reference', ref);
 
-    await pushAdmin(
-      admin,
-      '🚨 Socially.ng auto top-up FAILED',
-      `Paystack transfer of ₦${topupAmount.toLocaleString()} to Socially.ng failed. Reason: ${failReason}. Socially balance was ₦${sociallyBalance.toLocaleString()}.`,
-      { type: 'socially_topup_transfer_failed', reason: failReason, socially_balance: sociallyBalance },
-    ).catch(() => {});
+    if (anyFailed) {
+      await pushAdmin(
+        admin,
+        anySucceeded ? '⚠️ Scale-mode top-up partially failed' : '🚨 Scale-mode top-up FAILED',
+        `₦${topupAmount.toLocaleString()} scale-mode top-up to Socially.ng: ${failureDetails.length} of ${chunkAmounts.length} chunk(s) failed. ${failureDetails.join('; ')}`,
+        { type: 'socially_topup_scale_mode_failed', chunks: chunkAmounts.length, failed: failureDetails.length },
+      ).catch(() => {});
+    }
+    if (isPartial) await alertPartial();
 
     return new Response(JSON.stringify({
-      action: 'error',
-      reason: 'transfer_failed',
-      error: failReason,
-      socially_balance: sociallyBalance,
-    }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      action: anyFailed ? (anySucceeded ? 'topped_up_partial' : 'error') : 'topped_up',
+      amount: topupAmount,
+      chunks: chunkAmounts.length,
+      reference: ref,
+      socially_balance_before: sociallyBalance,
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: anyFailed && !anySucceeded ? 500 : 200,
+    });
 
   } catch (err) {
     console.error('ensure-socially-balance unhandled error:', err);

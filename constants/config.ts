@@ -2,18 +2,7 @@
 // Customer price = wholesale price + FLAT_ACQUISITION_FEE.
 // MARKUP is retained only for legacy server-side price validation in purchase-number.
 export const MARKUP = 1.4; // legacy — only used in purchase-number price guard
-export const FLAT_ACQUISITION_FEE = 1500; // ₦1,500 flat fee above wholesale — never reduced by anything, including transfer fees below
-
-// Paystack NGN transfer fees + the ₦50 stamp duty on transfers ≥ ₦10,000.
-// Mirrors supabase/functions/_shared/paystack-fees.ts exactly — when
-// near_instant_transfer_enabled is on, this is added on top of retail so the
-// customer covers it and the ₦1,500 margin is never touched. Client-side use
-// is display/charge-amount only; purchase-number enforces the real amount.
-export function paystackTransferFee(amountNaira: number): number {
-  const base = amountNaira <= 5_000 ? 10 : amountNaira <= 50_000 ? 25 : 50;
-  const stampDuty = amountNaira >= 10_000 ? 50 : 0;
-  return base + stampDuty;
-}
+export const FLAT_ACQUISITION_FEE = 1500; // ₦1,500 flat fee above wholesale — never reduced by anything
 
 export const PLATFORM_DESCRIPTIONS: Record<string, string> = {
   PayPal: "PayPal blocks Nigerian numbers from verifying accounts. A US or UK number gets you verified instantly so you can send, receive and hold dollars.",
