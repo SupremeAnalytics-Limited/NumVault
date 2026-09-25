@@ -87,9 +87,15 @@ Deno.serve(async (req: Request) => {
       const alertAdmin = async (detail: string) => {
         console.error(`CRITICAL: price-check refund failed for ${paystack_reference}: ${detail}`);
         try {
+          // Service role key, not the caller's token: notify-admin only accepts
+          // refund_failed from server-side callers, and the webhook-initiated
+          // path has no user token at all.
           await fetch(`${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/notify-admin`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
+            },
             body: JSON.stringify({
               action: 'refund_failed',
               paystack_reference,
