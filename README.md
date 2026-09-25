@@ -23,7 +23,7 @@ Whoever controls the number controls the identity. NumVault protects that root.
 
 | | |
 |---|---|
-| **Private numbers** | US numbers for **2,325 apps** (WhatsApp, Telegram, Instagram, TikTok, Google, X, Tinder, Snapchat…) plus numbers from **dozens of countries** |
+| **Private numbers** | US numbers for **2,300+ apps** (WhatsApp, Telegram, Instagram, TikTok, Google, X, Tinder, Snapchat…) plus numbers from **dozens of countries** |
 | **Pay per number** | No subscription. Customer pays wholesale + a flat **₦1,500** NumVault fee; Paystack's fee is added on top for the customer |
 | **Code or your money back** | If no code arrives within 5 minutes the order expires and the customer is refunded **to their NumVault wallet**, automatically |
 | **Wallet** | Money stays in the app, so a refund usually becomes the next purchase |
@@ -166,7 +166,7 @@ Every row is reached with the same flat ₦1,500 fee and the same self-funding m
 **Can the system carry it?**
 - **Database (Supabase, paid plan):** 100,000 sales a day is 1–2 writes a second; Postgres handles thousands. Server size can be raised as we grow.
 - **Payments (Paystack, registered business):** no collection cap once approved; volume discounts above ₦10m a month; bulk transfers of up to 100 per request. Scale Mode splits large top-ups into ₦10m transfers automatically.
-- **Supply:** our wholesale partnerships are **proprietary**. They cover 2,325+ apps on US numbers and numbers from dozens of countries, and any number where no code arrives is refunded to us and passed on to the customer.
+- **Supply:** our wholesale partnerships are **proprietary**. They cover 2,300+ apps on US numbers and numbers from dozens of countries, and any number where no code arrives is refunded to us and passed on to the customer.
 - **More numbers on demand:** new countries and services can be switched on as customers ask for them, with no change to our fee model.
 
 ## 9. Launch timeline
@@ -187,7 +187,7 @@ The timing of each step below is an **internal decision**, sequenced so that Num
 ## 10. Code status
 
 **Built and live:**
-- Mobile app (Expo / React Native): onboarding, login, number purchase for 2,325+ apps and dozens of countries, wallet, orders, push notifications, admin dashboard.
+- Mobile app (Expo / React Native): onboarding, login, number purchase for 2,300+ apps and dozens of countries, wallet, orders, push notifications, admin dashboard.
 - Payments: Paystack checkout and wallet top-ups with split payments; customer pays the Paystack fee; flat fee editable from the admin screen.
 - Refunds: automatic expiry after 5 minutes with a wallet refund (runs every minute), and completion if the code did arrive.
 - Wholesale funding: automatic top-ups after every purchase, a payout reserve that protects lead money first, and **Scale Mode** (a buffer that grows with demand; large top-ups batched).
