@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Redirect } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/template';
 import { getSetting } from '@/services/settingsService';
@@ -31,6 +32,10 @@ export default function RootScreen() {
     })();
     return () => { cancelled = true; };
   }, [initialized, loading, user]);
+
+  useEffect(() => {
+    if (target) SplashScreen.hideAsync().catch(() => {});
+  }, [target]);
 
   if (!target) return null;
   return <Redirect href={target as any} />;
