@@ -1,6 +1,7 @@
-// Shared by ensure-socially-balance (demand-based T+1-era top-up) and
-// purchase-number (near-instant per-purchase transfer) — both need the same
-// Paystack transfer recipient for Socially.ng's PalmPay account.
+// Used by ensure-socially-balance for both the classic and scale-mode
+// top-up paths, which both need the same Paystack transfer recipient for
+// Socially.ng's PalmPay account. purchase-number no longer imports this —
+// it does not send any transfer itself.
 const PAYSTACK_BASE = 'https://api.paystack.co';
 const SOCIALLY_ACCOUNT_NUMBER = '6635796668';
 const SOCIALLY_ACCOUNT_NAME = 'Riteweb Digital Services-Sim(Paymentpoint)';

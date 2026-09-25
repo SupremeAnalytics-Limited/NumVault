@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Reads an app_settings row (see migration 20260924092555_app_settings.sql).
+// Reads an app_settings row (see migration 20260924092615_app_settings.sql).
 // Falls back silently on any error/missing row — settings must never be able
 // to break the payment path they gate.
 export async function getSetting<T>(

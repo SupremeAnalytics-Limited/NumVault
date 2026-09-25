@@ -54,7 +54,8 @@ export default function CheckoutScreen() {
 
   const basePrice = parseFloat(params.price || '0');
   // Wholesale cost from Socially.ng — the exact amount Socially.ng must receive.
-  // Falls back to price/MARKUP (1.4×) if not supplied (defensive).
+  // Falls back to price / 1.4 if not supplied (defensive; not tied to the
+  // unused MARKUP constant in constants/config.ts).
   const wholesalePrice = params.wholesale_price
     ? parseFloat(params.wholesale_price)
     : basePrice / 1.4;

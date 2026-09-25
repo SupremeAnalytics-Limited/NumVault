@@ -1,8 +1,12 @@
 // Flat ₦1,500 acquisition contribution per qualifying direct number purchase.
 // Customer price = wholesale price + FLAT_ACQUISITION_FEE.
-// MARKUP is retained only for legacy server-side price validation in purchase-number.
-export const MARKUP = 1.4; // legacy — only used in purchase-number price guard
-export const FLAT_ACQUISITION_FEE = 1500; // ₦1,500 flat fee above wholesale — never reduced by anything
+// MARKUP is unused — no file in this repo imports it (purchase-number is a
+// Deno edge function and cannot import from this file at all; its own price
+// guard uses flat_acquisition_fee, not a markup ratio).
+export const MARKUP = 1.4;
+// Default used by services/sociallyService.ts when the admin-editable
+// app_settings.flat_acquisition_fee row hasn't loaded yet or errors.
+export const FLAT_ACQUISITION_FEE = 1500;
 
 export const PLATFORM_DESCRIPTIONS: Record<string, string> = {
   PayPal: "PayPal blocks Nigerian numbers from verifying accounts. A US or UK number gets you verified instantly so you can send, receive and hold dollars.",

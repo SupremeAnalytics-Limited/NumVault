@@ -88,9 +88,10 @@ Deno.serve(async (req: Request) => {
 
       // ── Wallet top-up ──────────────────────────────────────────────────────
       // The customer's wallet is credited with the FULL top-up amount.
-      // Paystack's settlement split (71.43% → Socially.ng, 28.57% → NumVault)
-      // is a behind-the-scenes account-funding mechanism and must NOT reduce
-      // the wallet credit — the customer already paid the full amount.
+      // wallet-topup's subaccount split (currently 71.43% → NumVault, 28.57%
+      // → Socially.ng — see setup-subaccount/index.ts) is a behind-the-scenes
+      // account-funding mechanism and must NOT reduce the wallet credit — the
+      // customer already paid the full amount.
       //
       // Idempotency guard: if a credit transaction for this Paystack reference
       // already exists, a duplicate webhook delivery must NOT credit the wallet
@@ -116,8 +117,9 @@ Deno.serve(async (req: Request) => {
       // ── Number purchase — server-side safety net ───────────────────────────
       // Triggered when the client-side WebView misses the payment callback
       // (app backgrounded, bank transfer settled async, USSD delay, etc.).
-      // Guard: check whether an order for this Paystack reference already exists.
-      // If client-side already completed the purchase, skip cleanly.
+      // No existence check happens here — purchase-number is always called,
+      // and its own purchase_locks table decides atomically whether this
+      // reference has already been handled (see the comment below).
       if (type === 'number_purchase') {
         const providerCode   = metadata?.provider_code;
         const countryCode    = metadata?.country_code;
