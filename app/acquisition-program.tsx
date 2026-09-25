@@ -544,6 +544,9 @@ export default function AcquisitionProgramScreen() {
 
   const blockNum = participant ? currentBlockNumber(participant) : 1;
   const pendingCount = referred.filter((r) => !r.validated).length;
+  // Customers needed per day to reach 76 before the current 30-day window ends.
+  const toGo = Math.max(0, 76 - qualCount);
+  const dailyTarget = !needsReEnroll && toGo > 0 && daysLeft > 0 ? Math.ceil(toGo / daysLeft) : 0;
 
   const monthsRemaining = paidPeriodsRemaining(participant ?? { paid_periods_completed: 0 } as AcquisitionParticipant);
   const potentialRemaining = monthsRemaining * 100000;
@@ -836,6 +839,11 @@ export default function AcquisitionProgramScreen() {
                           </View>
                         </View>
                       </View>
+                      {dailyTarget ? (
+                        <Text style={styles.dailyTarget}>
+                          <Text style={{ color: GREEN, fontWeight: '600' }}>{dailyTarget} a day</Text> keeps you on track to 76
+                        </Text>
+                      ) : null}
                     </View>
 
                     <View style={styles.cpCard} ref={cpCardRef}>
@@ -951,6 +959,11 @@ export default function AcquisitionProgramScreen() {
                           </View>
                         </View>
                       </View>
+                      {dailyTarget ? (
+                        <Text style={styles.dailyTarget}>
+                          <Text style={{ color: GREEN, fontWeight: '600' }}>{dailyTarget} a day</Text> keeps you on track to 76
+                        </Text>
+                      ) : null}
                     </View>
 
                     <View style={styles.scard}>
@@ -1544,6 +1557,7 @@ const styles = StyleSheet.create({
   topCardLabel: { fontSize: 10, color: MUTED2, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 },
   topCardHeadline: { fontSize: 22, fontWeight: '700', color: TEXT, lineHeight: 26, marginBottom: 6 },
   topCardSub: { fontSize: 12, color: MUTED, lineHeight: 18 },
+  dailyTarget: { fontSize: 12, color: MUTED, textAlign: 'center', marginTop: 10 },
   topCardBig: { fontSize: 28, fontWeight: '700', color: GREEN, lineHeight: 32, marginBottom: 4 },
   topCardBigSub: { fontSize: 11, color: MUTED },
   topCardDivider: { height: 1, backgroundColor: BORDER, marginBottom: 14 },
