@@ -52,6 +52,17 @@ Deno.serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 
+    // ── Transfer outcomes (lead payouts, Socially.ng top-ups) ────────────────
+    // A transfer request that Paystack accepts usually starts as pending; its
+    // real outcome only arrives here. Without this, a transfer that later
+    // failed or was reversed stayed recorded as paid.
+    if (['transfer.success', 'transfer.failed', 'transfer.reversed'].includes(payload.event)) {
+      await handleTransferEvent(supabaseAdmin, payload.event, payload.data, secretKey);
+      return new Response(JSON.stringify({ received: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     if (payload.event === 'charge.success') {
       const { reference, customer, metadata, authorization } = payload.data;
       const userId = metadata?.user_id;
@@ -214,4 +225,192 @@ async function isValidPaystackSignature(rawBody: string, signature: string, secr
   let diff = 0;
   for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
   return diff === 0;
+}
+
+// ── Transfer events ───────────────────────────────────────────────────────────
+
+const ADMIN_EMAIL = 'oluwaferanmionabanjo@gmail.com';
+
+// supabase-js generics don't survive ReturnType<typeof createClient> (every
+// table resolves to `never`), so the helpers below take an untyped client.
+// deno-lint-ignore no-explicit-any
+type AdminClient = any;
+
+async function handleTransferEvent(
+  admin: AdminClient,
+  event: string,
+  data: any,
+  secretKey: string,
+): Promise<void> {
+  const reference: string | undefined = data?.reference;
+  if (!reference) return;
+
+  // Trust Paystack's current record over the event body where we can.
+  let status: string = event.replace('transfer.', '');
+  let transferCode: string | null = data?.transfer_code ?? null;
+  try {
+    const res = await fetch(`${PAYSTACK_BASE}/transfer/verify/${encodeURIComponent(reference)}`, {
+      headers: { Authorization: `Bearer ${secretKey}` },
+    });
+    const json = await res.json();
+    if (res.ok && json.status && json.data?.status) {
+      status = json.data.status;
+      transferCode = json.data.transfer_code ?? transferCode;
+    }
+  } catch { /* fall back to the signed event body */ }
+
+  const failed = status === 'failed' || status === 'reversed';
+  if (status !== 'success' && !failed) {
+    console.log(`Transfer ${reference} is ${status}; waiting for a final event`);
+    return;
+  }
+
+  // ── Socially.ng top-up ─────────────────────────────────────────────────────
+  const { data: topup } = await admin
+    .from('socially_transfers')
+    .select('id, status, amount_transferred')
+    .eq('order_reference', reference)
+    .limit(1)
+    .maybeSingle();
+
+  if (topup) {
+    if (!failed) {
+      await admin.from('socially_transfers')
+        .update({ status: 'success', error_message: null })
+        .eq('id', topup.id);
+      console.log(`Top-up ${reference} confirmed`);
+      return;
+    }
+    await admin.from('socially_transfers')
+      .update({ status: 'failed', error_message: `Paystack transfer ${status}` })
+      .eq('id', topup.id);
+    await pushAdmin(
+      admin,
+      `🚨 Socially.ng top-up ${status}`,
+      `₦${Number(topup.amount_transferred).toLocaleString()} top-up to Socially.ng was ${status} by Paystack. Retrying automatically.`,
+      { type: 'socially_topup_transfer_' + status, reference },
+    ).catch(() => {});
+    // Retry now instead of waiting for the next purchase to notice.
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 5_000);
+      await fetch(`${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/ensure-socially-balance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}` },
+        body: JSON.stringify({}),
+        signal: controller.signal,
+      });
+      clearTimeout(tid);
+    } catch { /* non-blocking */ }
+    return;
+  }
+
+  // ── Lead payout (reference is payout_id, or payout_id-r<attempt>) ─────────
+  const payoutId = reference.replace(/-r\d+$/, '');
+  const { data: payout } = await admin
+    .from('lead_payouts')
+    .select('id, participant_id, amount, status, transfer_attempt')
+    .eq('id', payoutId)
+    .maybeSingle();
+  if (!payout) {
+    console.log(`Transfer ${reference} matches no top-up or payout`);
+    return;
+  }
+
+  // Ignore events for an earlier attempt that has already been replaced.
+  const attempt = Number(payout.transfer_attempt ?? 0);
+  const currentRef = attempt > 0 ? `${payout.id}-r${attempt}` : payout.id;
+  if (reference !== currentRef) {
+    console.log(`Ignoring stale transfer event ${reference} (current ${currentRef})`);
+    return;
+  }
+
+  const amountText = `₦${Number(payout.amount).toLocaleString()}`;
+
+  if (!failed) {
+    if (payout.status === 'sent') return;
+    await admin.from('lead_payouts').update({
+      status: 'sent',
+      paystack_transfer_code: transferCode,
+      sent_at: new Date().toISOString(),
+      failure_reason: null,
+    }).eq('id', payout.id);
+    await pushParticipant(
+      admin, payout.participant_id,
+      '💸 Payment sent!',
+      `Your payout of ${amountText} has been approved and is on its way to your bank account.`,
+      { type: 'payout_sent', payout_id: payout.id, transfer_code: transferCode },
+    ).catch(() => {});
+    return;
+  }
+
+  // Failed or reversed: back to failed (re-approvable) with a fresh reference.
+  await admin.from('lead_payouts').update({
+    status: 'failed',
+    failure_reason: `Paystack: transfer ${status}`,
+    transfer_attempt: attempt + 1,
+  }).eq('id', payout.id);
+  await pushAdmin(
+    admin,
+    `⚠️ Lead payout ${status}`,
+    `A ${amountText} lead payout was ${status} by Paystack. Check the lead's bank details, then approve it again.`,
+    { type: 'payout_transfer_' + status, payout_id: payout.id },
+  ).catch(() => {});
+  if (payout.status === 'sent') {
+    await pushParticipant(
+      admin, payout.participant_id,
+      'Payout delayed',
+      `Your ${amountText} payout didn't reach your bank. We're sorting it out; please check your bank details in the app.`,
+      { type: 'payout_failed', payout_id: payout.id },
+    ).catch(() => {});
+  }
+}
+
+async function pushAdmin(
+  admin: AdminClient,
+  title: string,
+  body: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const { data: profile } = await admin
+    .from('user_profiles')
+    .select('push_token')
+    .eq('email', ADMIN_EMAIL)
+    .maybeSingle();
+  await sendExpoPush(profile?.push_token, title, body, data);
+}
+
+async function pushParticipant(
+  admin: AdminClient,
+  participantId: string,
+  title: string,
+  body: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const { data: participant } = await admin
+    .from('acquisition_participants')
+    .select('user_id')
+    .eq('id', participantId)
+    .maybeSingle();
+  if (!participant?.user_id) return;
+  const { data: profile } = await admin
+    .from('user_profiles')
+    .select('push_token')
+    .eq('id', participant.user_id)
+    .maybeSingle();
+  await sendExpoPush(profile?.push_token, title, body, data);
+}
+
+async function sendExpoPush(
+  token: string | null | undefined,
+  title: string,
+  body: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  if (!token?.startsWith('ExponentPushToken[')) return;
+  await fetch('https://exp.host/--/api/v2/push/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ to: token, title, body, data, sound: 'default', priority: 'high' }),
+  });
 }

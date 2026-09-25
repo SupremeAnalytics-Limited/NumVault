@@ -175,13 +175,17 @@ Deno.serve(async (req: Request) => {
       }
 
       // ── Fire Paystack transfer ───────────────────────────────────────────
+      // A failed or reversed transfer burns its reference (see
+      // transfer_attempt migration), so retries use a fresh one.
+      const attempt = Number(payout.transfer_attempt ?? 0);
+      const transferRef = attempt > 0 ? `${payout_id}-r${attempt}` : payout_id;
       const amountKobo = Math.round(Number(payout.amount) * 100);
       const transferPayload = {
         source: 'balance',
         reason: `NumVault Lead payout — block ${payout.block_number ?? '?'} half ${payout.cycle_number}`,
         amount: amountKobo,
         recipient: participant.paystack_recipient_code,
-        reference: payout_id, // UUID — Paystack deduplicates by reference
+        reference: transferRef, // Paystack deduplicates by reference
       };
 
       console.log('Initiating Paystack transfer:', JSON.stringify(transferPayload));
@@ -215,6 +219,21 @@ Deno.serve(async (req: Request) => {
       // ── Paystack accepted ────────────────────────────────────────────────
       if (psRes.ok && psData.status) {
         const transferCode = psData.data?.transfer_code ?? null;
+
+        // Accepted isn't paid: most transfers start as pending. Keep the row
+        // approved until paystack-webhook's transfer.success marks it sent
+        // (or transfer.failed / transfer.reversed marks it failed).
+        if (psData.data?.status !== 'success') {
+          await admin.from('lead_payouts').update({
+            status: 'approved',
+            paystack_transfer_code: transferCode,
+            failure_reason: null,
+          }).eq('id', payout_id);
+          return new Response(JSON.stringify({ ok: true, status: 'approved', transfer_code: transferCode, note: 'Transfer is processing on Paystack' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
         await admin.from('lead_payouts').update({
           status: 'sent',
           paystack_transfer_code: transferCode,
@@ -239,7 +258,7 @@ Deno.serve(async (req: Request) => {
       // Before marking failed, check via GET /transfer/verify/{reference}.
       // A transfer with this reference may already exist (e.g., previous attempt
       // timed out before we received the response).
-      const verifyRes = await fetch(`https://api.paystack.co/transfer/verify/${payout_id}`, {
+      const verifyRes = await fetch(`https://api.paystack.co/transfer/verify/${transferRef}`, {
         headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
       });
       const verifyData = await verifyRes.json();
@@ -292,11 +311,15 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Verify also failed or transfer does not exist — mark failed
+      // Verify also failed or transfer does not exist — mark failed. If a
+      // transfer with this reference exists and failed, the reference is
+      // spent, so the next approval must use a new one.
       const reason = psData.message || psData.data?.message || 'Paystack transfer failed';
+      const refSpent = ['failed', 'reversed'].includes(verifyData?.data?.status ?? '');
       await admin.from('lead_payouts').update({
         status: 'failed',
         failure_reason: `Paystack: ${reason}`,
+        ...(refSpent ? { transfer_attempt: attempt + 1 } : {}),
       }).eq('id', payout_id);
 
       return new Response(JSON.stringify({ ok: false, status: 'failed', reason }), {
