@@ -6,7 +6,11 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
  *
  * Currently handles:
  *   action: 'enrollment' — a student just enrolled in the acquisition program.
- *     Required: participant_name (string)
+ *     Required: participant_name (string). Any signed-in user may send this.
+ *   action: 'refund_failed' — purchase-number could not refund a Paystack
+ *     payment that failed its price check. Fields: paystack_reference,
+ *     user_id, detail. Accepted ONLY from server-side callers (service role
+ *     key), so a customer can't send the admin fake refund alerts.
  *
  * A failed notification never returns an error to the caller — it is always
  * fire-and-forget from the app's perspective.
@@ -34,19 +38,36 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
 
-    // Verify JWT
-    const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
-    if (userErr || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 401,
-      });
+    // Server-to-server calls send the service role key, which is not a user
+    // session, so getUser() would reject it — check for it first.
+    const isServiceCall = token === (Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
+
+    if (!isServiceCall) {
+      const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
+      if (userErr || !user) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 401,
+        });
+      }
     }
 
     const body = await req.json().catch(() => ({}));
     const { action, participant_name } = body;
 
-    if (action === 'enrollment') {
+    if (action === 'refund_failed') {
+      if (!isServiceCall) {
+        console.warn('notify-admin: refund_failed rejected — not a server-side caller');
+      } else {
+        const ref: string = body.paystack_reference ?? 'unknown';
+        await sendAdminPush(
+          supabaseAdmin,
+          '🚨 Refund failed — customer money needs manual refund',
+          `Paystack payment ${ref} (user ${body.user_id ?? 'unknown'}) failed the price check and could not be refunded automatically. ${body.detail ?? ''}`.trim(),
+          { type: 'admin_refund_failed', paystack_reference: ref, user_id: body.user_id ?? null },
+        );
+      }
+    } else if (action === 'enrollment') {
       const name: string = participant_name ?? 'Someone';
       await sendAdminPush(
         supabaseAdmin,
