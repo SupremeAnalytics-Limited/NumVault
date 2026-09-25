@@ -9,6 +9,12 @@ import { WalletProvider } from '@/contexts/WalletContext';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import * as SplashScreen from 'expo-splash-screen';
+import { Colors } from '@/constants/theme';
+
+// Keep the native splash up until app/index.tsx knows where to send the user,
+// so there's no blank white frame between the splash and the first screen.
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // ─── Sentry initialisation ───────────────────────────────────────────────────
 // DSN is injected at build time via EXPO_PUBLIC_SENTRY_DSN (Cloud Secret).
@@ -103,6 +109,12 @@ function RootLayout() {
     }
   }, [navigationRef]);
 
+  // Safety net: never leave the splash up if the first route can't resolve.
+  useEffect(() => {
+    const t = setTimeout(() => { SplashScreen.hideAsync().catch(() => {}); }, 8000);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <AlertProvider>
       <SafeAreaProvider>
@@ -110,7 +122,7 @@ function RootLayout() {
           <WalletProvider>
             <OrderProvider>
               <NotificationSetup />
-              <Stack screenOptions={{ headerShown: false }}>
+              <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.background } }}>
                 <Stack.Screen name="index" />
                 <Stack.Screen name="onboarding" />
                 <Stack.Screen name="login" />
