@@ -6,6 +6,69 @@ import { getSetting } from '../_shared/settings.ts';
 /**
  * ensure-socially-balance
  *
+ * ── The wholesale account, in plain terms ───────────────────────────────────
+ * Socially.ng requires NumVault to keep a prepaid balance sitting with them —
+ * the "wholesale account" — before NumVault can buy any number through their
+ * API. This function's entire job is keeping that wholesale account funded.
+ * It is checked and topped up automatically after every purchase, success or
+ * failure — not on a timer, not once a day.
+ *
+ * ── Why direct Paystack number purchases can NEVER cause a shortfall ───────
+ * When a customer pays directly (not from wallet) for a number, Paystack
+ * splits the payment at the transaction level: the wholesale portion goes
+ * straight to Socially.ng's subaccount (settles T+1 to their bank), and only
+ * the flat margin (transaction_charge, e.g. ₦1,500) lands in NumVault's own
+ * balance. That wholesale money never passes through NumVault's hands — it
+ * cannot be reserved for ambassador payouts and cannot cause a shortfall
+ * here. See purchase-number/index.ts and wallet-topup/index.ts.
+ *
+ * ── Why wallet purchases CAN cause a shortfall — the actual gap this closes
+ * Wallet top-ups split 71.43% NumVault / 28.57% Socially.ng at the MOMENT OF
+ * TOP-UP — a guess against the top-up amount, not against whatever the
+ * customer eventually buys. Example: a ₦10,000 top-up sets aside ₦2,857 for
+ * Socially.ng. If that ₦10,000 wallet balance later buys a number whose real
+ * wholesale cost is ₦8,500, Socially.ng's wholesale account is debited the
+ * full ₦8,500 at that moment — but only ₦2,857 was ever pre-funded toward
+ * it. The ₦5,643 gap has to come from somewhere: NumVault's general Paystack
+ * balance, via this function. This gap is the entire reason this function
+ * exists — nothing else in the codebase closes it.
+ *
+ * ── What this function is NOT ───────────────────────────────────────────────
+ * - Not redundant with the settlement splits above: the splits pay
+ *   Socially.ng revenue for past sales; this function separately funds their
+ *   operational balance so future orders don't fail. Same eventual bank
+ *   account, different purpose, different money.
+ * - Does not read Paystack's transaction history. The 24h figure Scale Mode
+ *   uses (below) comes from NumVault's own `orders` table — what was SOLD,
+ *   not what was SENT. Opposite directions; don't confuse them.
+ * - Scale Mode (app_settings.scale_mode_enabled) is not a second mechanism —
+ *   it's a branch inside this same function that only changes the "how much
+ *   to send" math. Both branches call the identical Transfer code at the
+ *   end. There is nothing Scale Mode does that this function doesn't already
+ *   do; it's a bigger dial on the same machine, not a competing one.
+ *
+ * ── Why sending a Transfer doesn't dodge T+1/T+2 ────────────────────────────
+ * A Transfer can only move money that has ALREADY settled into NumVault's
+ * Paystack balance — it cannot touch today's still-unsettled sales. What it
+ * draws on is the pool of everything settled from PAST days combined. The
+ * value of using Transfer here isn't beating T+1 (nothing beats T+1) — it's
+ * that NumVault can pull an exact, on-demand amount from that pool whenever
+ * the wholesale account needs it, instead of being limited to the fixed,
+ * automatic, one-day-late cuts the settlement splits send per transaction.
+ *
+ * ── Why the "couldn't top up" alert (see skipInsufficientPaystack below) is
+ * a real, reachable failure, not just theoretical ──────────────────────────
+ * Step 4 always reserves money owed/accruing to ambassador leads BEFORE
+ * calculating what's free to send Socially.ng — ambassador payouts are
+ * protected first, unconditionally, every time. Under normal conditions the
+ * gap above gets closed reliably. But if enough active ambassador leads are
+ * simultaneously owed their monthly ₦100k at the same time as a high-demand
+ * sales period (more likely under Scale Mode, since its target is uncapped),
+ * there may genuinely not be enough free balance for both — and this
+ * function correctly refuses to take ambassador money to fund Socially.ng,
+ * alerting the admin instead of silently under-funding either side.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
  * Checks the Socially.ng balance and tops it up via a Paystack transfer if
  * it falls below LOW_THRESHOLD. The amount follows demand (last hour's
  * wholesale spend × DEMAND_MULTIPLIER, clamped to MIN/MAX) and never touches
