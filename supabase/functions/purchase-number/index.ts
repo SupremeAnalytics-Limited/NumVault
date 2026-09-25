@@ -63,6 +63,98 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // Price validation runs before the Paystack lock and verification below.
+    // If a customer has already paid through Paystack and the price check
+    // then fails, no order is created — so refund the verified amount to
+    // their wallet here. Claiming the purchase_locks row first means only one
+    // call ever handles a given payment: if another call already bought the
+    // number (or refunded), this one skips; if this one refunds, a later call
+    // hits the lock and can't buy. credit_wallet additionally ignores a repeat
+    // credit on the same reference. Wallet purchases skip all of this.
+    const priceFailureResponse = async (
+      status: number,
+      payload: Record<string, unknown>,
+      refundDescription: string,
+    ): Promise<Response> => {
+      const respond = (extra: Record<string, unknown> = {}) =>
+        new Response(JSON.stringify({ ...payload, ...extra }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status,
+        });
+
+      if (!paystack_reference || use_wallet === true) return respond();
+
+      const alertAdmin = async (detail: string) => {
+        console.error(`CRITICAL: price-check refund failed for ${paystack_reference}: ${detail}`);
+        try {
+          await fetch(`${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/notify-admin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({
+              action: 'refund_failed',
+              paystack_reference,
+              user_id: user.id,
+              detail,
+            }),
+          });
+        } catch (notifyErr) {
+          console.error('notify-admin call failed:', notifyErr);
+        }
+      };
+
+      try {
+        const verifyRes = await fetch(`${PAYSTACK_BASE}/transaction/verify/${paystack_reference}`, {
+          headers: {
+            'Authorization': `Bearer ${Deno.env.get('PAYSTACK_SECRET_KEY')}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        const verifyData = await verifyRes.json();
+
+        let meta = verifyData?.data?.metadata;
+        if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch { meta = null; } }
+
+        if (!verifyData?.status || verifyData.data?.status !== 'success' || meta?.user_id !== user.id) {
+          await alertAdmin(`verification did not pass (status=${verifyData?.data?.status}, metadata user=${meta?.user_id}, caller=${user.id})`);
+          return respond();
+        }
+
+        // Claim this payment the same way the purchase path does. credit_wallet
+        // only dedupes refund-vs-refund; the lock also stops refund-vs-purchase
+        // (one call buying the number while another refunds the same payment).
+        const { error: lockErr } = await supabaseAdmin
+          .from('purchase_locks')
+          .insert({ paystack_reference, user_id: user.id });
+        if (lockErr) {
+          if (lockErr.code === '23505') {
+            console.log(`Price-check refund skipped: ${paystack_reference} is already held by another call`);
+          } else {
+            await alertAdmin(`purchase_locks insert error: ${lockErr.message}`);
+          }
+          return respond();
+        }
+
+        const refundAmount = verifyData.data.amount / 100;
+        const { data: newBalance, error: refundErr } = await supabaseAdmin.rpc('credit_wallet', {
+          p_user_id: user.id,
+          p_amount: refundAmount,
+          p_reference: paystack_reference,
+          p_description: refundDescription,
+        });
+        if (refundErr) {
+          await alertAdmin(`credit_wallet error: ${refundErr.message}`);
+          return respond();
+        }
+        console.log(newBalance === null
+          ? `Price-check refund skipped: ${paystack_reference} was already credited`
+          : `Price-check refund credited: ₦${refundAmount} → user ${user.id}, new balance: ${newBalance}`);
+        return respond({ refunded: true, refund_amount: refundAmount });
+      } catch (err) {
+        await alertAdmin(`exception: ${err instanceof Error ? err.message : String(err)}`);
+        return respond();
+      }
+    };
+
     // ── SERVER-SIDE PRICE VALIDATION ─────────────────────────────────────────
     // Fetch the authoritative price from Socially.ng before debiting anything.
     // This prevents clients from sending a manipulated amount_paid value.
@@ -103,13 +195,10 @@ Deno.serve(async (req: Request) => {
           console.warn(
             `Price mismatch: client sent ${clientRetail}, server expects ${expectedRetail} for ${project_code}/${country_code}`
           );
-          return new Response(JSON.stringify({
+          return await priceFailureResponse(409, {
             error: 'The price for this service has changed. Please go back and try again.',
             price_changed: true,
-          }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 409,
-          });
+          }, 'Refund: price changed before purchase');
         }
         console.log(`Price validated: client=${clientRetail}, server=${expectedRetail} (wholesale=${wholesale} + fee=1500) ✓`);
       } else {
@@ -119,13 +208,11 @@ Deno.serve(async (req: Request) => {
       console.warn('Price validation fetch failed:', priceErr);
     }
     if (expectedRetail === null) {
-      // Without a server price we cannot trust amount_paid, so nothing is charged.
-      return new Response(JSON.stringify({
+      // Without a server price we cannot trust amount_paid, so nothing is
+      // charged — and a direct Paystack payment already taken is refunded.
+      return await priceFailureResponse(503, {
         error: 'We could not confirm the price for this service. Please try again in a moment.',
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 503,
-      });
+      }, 'Refund: price could not be confirmed');
     }
     // ── END PRICE VALIDATION ─────────────────────────────────────────────────
 
