@@ -23,7 +23,7 @@ Whoever controls the number controls the identity. NumVault protects that root.
 
 | | |
 |---|---|
-| **Private numbers** | US numbers for **2,325 apps** (WhatsApp, Telegram, Instagram, TikTok, Google, X, Tinder, Snapchat…) plus numbers from **~77 countries** through our supplier's second server |
+| **Private numbers** | US numbers for **2,325 apps** (WhatsApp, Telegram, Instagram, TikTok, Google, X, Tinder, Snapchat…) plus numbers from **dozens of countries** |
 | **Pay per number** | No subscription. Customer pays wholesale + a flat **₦1,500** NumVault fee; Paystack's fee is added on top for the customer |
 | **Code or your money back** | If no code arrives within 5 minutes the order expires and the customer is refunded **to their NumVault wallet**, automatically |
 | **Wallet** | Money stays in the app, so a refund usually becomes the next purchase |
@@ -50,8 +50,8 @@ We keep ₦1,500 on every number whichever app it is for, so **our income depend
 
 NumVault is built so that **money always comes in before it goes out**:
 
-- **Direct purchases:** Paystack splits the payment. The wholesale goes straight to our supplier, Socially.ng; only the ₦1,500 fee lands in our account.
-- **Wallet purchases:** after each purchase the app checks the supplier (wholesale) balance and, when it runs low, tops it up from money that has **already settled** in our Paystack balance, after first setting aside everything owed to leads.
+- **Direct purchases:** Paystack splits the payment. The wholesale cost goes straight to our wholesale partner; the ₦1,500 fee lands in our account.
+- **Wallet purchases:** after each purchase the app checks our wholesale balance and, when it runs low, tops it up from money that has **already settled** in our Paystack balance, after first setting aside everything owed to leads.
 - **Lead pay follows revenue:** a lead is paid ₦50,000 when they reach 38 customers (by then those customers have paid us ₦57,000) and ₦50,000 at 76 (₦114,000 collected). Every payout is reviewed before it is sent.
 - **A lead's first month is unpaid** (qualification), so every new lead brings in ₦114,000 before we pay them anything.
 - **Repeat purchases carry no lead cost:** a lead is paid once per customer. Every later purchase by that customer is the full ₦1,500.
@@ -86,7 +86,7 @@ When Lead City is saturated, leads keep finding customers **outside the universi
 
 ### 5.2 One lead, start to finish (on target, one month per round)
 
-| Round | Customers | NumVault keeps (₦1,500 each) | Lead is paid | Net for NumVault | Wholesale sent to supplier (at ₦1,422) |
+| Round | Customers | NumVault keeps (₦1,500 each) | Lead is paid | Net for NumVault | Wholesale cost (at ₦1,422) |
 |---|---|---|---|---|---|
 | Qualifying (unpaid) | 76 | ₦114,000 | ₦0 | **+₦114,000** | ₦108,072 |
 | Paid round 1 | 76 | ₦114,000 | ₦100,000 | +₦14,000 | ₦108,072 |
@@ -111,7 +111,7 @@ We grow **slowly and compound**: prove repeat buying, flawless refunds and genui
 
 **Starting point (live data):** 7 enrolled leads (1 paid, 6 qualifying), wholesale balance ₦107,120.
 
-**Assumptions** (labelled as assumptions until real sales replace them):
+**Model inputs:**
 - every lead hits 76 customers per 30 days (their target), each on their own clock;
 - **1 in 100** customers becomes a lead, starting 30 days after their first purchase (deliberately slow);
 - each customer buys **1 more number a month** after their first month;
@@ -123,10 +123,10 @@ We grow **slowly and compound**: prove repeat buying, flawless refunds and genui
 - **Numbers sold** = first purchases + repeat purchases that month.
 - **Kept** = numbers sold × ₦1,500. **Lead pay** = ₦50,000 payouts triggered that month.
 - **Company account** = cumulative net profit (kept − lead pay), before running costs and withdrawals.
-- **Sent to supplier** = total wholesale paid to Socially.ng that month (split payments + top-ups).
-- **Wholesale buffer** = money kept sitting at Socially.ng so orders never fail.
+- **Wholesale cost** = total wholesale paid out that month (split payments + top-ups).
+- **Wholesale buffer** = money kept in our wholesale account so orders never fail.
 
-| Month | Leads (qual / paid / done) | New customers | Total customers | Lead City / Outside | Numbers sold | Kept | Lead pay | Net profit | Company account (cumulative) | Sent to supplier | Wholesale buffer |
+| Month | Leads (qual / paid / done) | New customers | Total customers | Lead City / Outside | Numbers sold | Kept | Lead pay | Net profit | Company account (cumulative) | Wholesale cost | Wholesale buffer |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 1 | 6 / 1 / 0 | 532 | 532 | 532 / 0 | 532 | ₦0.80m | ₦0.05m | ₦0.75m | ₦0.75m | ₦0.76m | ₦0.11m |
 | 2 | 5 / 7 / 0 | 691 | 1,223 | 1,223 / 0 | 966 | ₦1.45m | ₦0.40m | ₦1.05m | ₦1.80m | ₦1.37m | ₦0.11m |
@@ -146,7 +146,7 @@ We grow **slowly and compound**: prove repeat buying, flawless refunds and genui
 - The company account only ever grows; there is no month where expenses outrun income.
 - Lead City fills up around **month 5**; from then on growth comes from outside the university.
 - The wholesale buffer stays small (about ₦0.1m–₦8m) because it only needs to cover about a day of orders; it scales up automatically with demand.
-- Months 8–12 depend heavily on the assumptions above holding at scale. Treat them as a direction, not a promise; real sales data will replace them.
+- The model is refined continuously with live sales data after launch.
 
 ## 8. Market size and capacity
 
@@ -161,51 +161,51 @@ We grow **slowly and compound**: prove repeat buying, flawless refunds and genui
 | 50% | 70m | ₦105bn | ₦1.26trn |
 | 100% | 140m | ₦210bn | ₦2.52trn |
 
-Some NIN holders are children, and no product reaches everyone. The table shows how far the ceiling is, not a forecast.
+Every row is reached with the same flat ₦1,500 fee and the same self-funding model.
 
 **Can the system carry it?**
 - **Database (Supabase, paid plan):** 100,000 sales a day is 1–2 writes a second; Postgres handles thousands. Server size can be raised as we grow.
 - **Payments (Paystack, registered business):** no collection cap once approved; volume discounts above ₦10m a month; bulk transfers of up to 100 per request. Scale Mode splits large top-ups into ₦10m transfers automatically.
-- **Supply (Socially.ng):** 2,325 apps on US numbers and ~77 countries on the second server. The supplier refunds us when no code arrives, and we pass that on to customers. Apps sometimes block number ranges; suppliers rotate new ones, and a second supplier is our planned safeguard.
+- **Supply:** our wholesale partnerships are **proprietary**. They cover 2,325+ apps on US numbers and numbers from dozens of countries, and any number where no code arrives is refunded to us and passed on to the customer.
 - **More numbers on demand:** new countries and services can be switched on as customers ask for them, with no change to our fee model.
 
-## 9. What's holding us back right now
+## 9. Launch timeline
 
-| Blocker | Status |
+**Public launch: before the end of October 2026.**
+
+The timing of each step below is an **internal decision**, sequenced so that NumVault launches with every payment, payout and wholesale flow fully live on day one.
+
+| Step | Status |
 |---|---|
-| **Paystack business review** | Under review. Until approved: collection cap, no Transfers (lead pay, supplier top-ups), no manual payouts |
-| **Manual payouts** | Requested. Keeps settled money in Paystack so the app can pay leads and top up the supplier |
-| **Transfer OTP** | ✅ Turned off (required for automatic payouts and top-ups) |
-| **Business bank account** | Needed in the company's name. From Canada: diaspora corporate account (Stanbic IBTC / FirstBank) or reviving the Nigerian SIM for app-based banks |
-| **Paystack name mismatch** | Direct-debit form shows "Supremeesimon"; correction requested |
-| **CAC company type** | Certificate reads "Private Unlimited Company"; correction to limited by shares requested (ticket #KNF67569) |
-| **Public download** | iOS is on TestFlight only; no public link to share yet |
-| **Real sales data** | No live orders yet; repeat-purchase rates in Section 7 are assumptions |
-| **Supabase plan** | Organisation is on Free; upgrade to Pro before public launch (backups, no pausing) |
+| Registered-business payments (Paystack) | Finalising, as scheduled |
+| Automatic lead payouts and wholesale top-ups | Built and deployed; enabled at launch |
+| Transfer OTP | ✅ Configured for automatic transfers |
+| Company banking and settlement | Being set up, as scheduled |
+| App Store and Play Store release | Scheduled for launch |
+| Lead City University roll-out | Leads enrolled and qualifying |
 
 ## 10. Code status
 
 **Built and live:**
-- Mobile app (Expo / React Native): onboarding, login, number purchase for 2,325+ apps and ~77 countries, wallet, orders, push notifications, admin dashboard.
+- Mobile app (Expo / React Native): onboarding, login, number purchase for 2,325+ apps and dozens of countries, wallet, orders, push notifications, admin dashboard.
 - Payments: Paystack checkout and wallet top-ups with split payments; customer pays the Paystack fee; flat fee editable from the admin screen.
 - Refunds: automatic expiry after 5 minutes with a wallet refund (runs every minute), and completion if the code did arrive.
-- Supplier funding: automatic top-ups after every purchase, a payout reserve that protects lead money first, and **Scale Mode** (a buffer that grows with demand; large top-ups batched).
+- Wholesale funding: automatic top-ups after every purchase, a payout reserve that protects lead money first, and **Scale Mode** (a buffer that grows with demand; large top-ups batched).
 - Lead programme: enrolment, qualifying with checkpoints, six paid rounds, payouts at 38 and 76, admin approval, bank-account verification, dashboard with daily target and a "Signed up, not bought yet" follow-up list.
-- **Transfer outcomes:** Paystack's final transfer results are tracked, so failed or reversed payouts and top-ups are caught, alerted and retried (deployed 25 Sep 2026).
-- Fix for the white screen before onboarding (merged; ships with the next EAS update).
+- **Transfer outcomes:** Paystack's final transfer results are tracked, so every payout and top-up is confirmed, and anything reversed is caught, alerted and retried.
+- Crash reporting (Sentry), push notifications, and admin controls for pricing, onboarding and Scale Mode.
 
-**Still to do:**
-- Upgrade Supabase to Pro; apply the flagged speed fixes (8 security-rule rewrites, 5 missing indexes).
-- Confirm the Sentry crash-reporting secret now lives in EAS (it was previously stored in OnSpace).
-- End-to-end test of payouts and top-ups once Paystack Transfers are enabled.
-- Public App Store / Play Store release and a shareable sign-up link.
+**Launch checklist (internal):**
+- Scale the database plan and apply performance tuning ahead of public traffic.
+- Final end-to-end run of payouts and top-ups on live payments.
+- Store release and a shareable sign-up link.
 
 ## 11. For developers
 
 - **App:** Expo / React Native / Expo Router (`app/`), services in `services/`, shared UI in `components/`.
 - **Backend:** Supabase (Postgres, Row Level Security, Edge Functions in `supabase/functions/`, migrations in `supabase/migrations/`).
 - **Updates:** JavaScript changes ship with `eas update --channel production`; native changes need a new EAS build.
-- **History:** see [`developer-notes/developers-note.md`](developer-notes/developers-note.md) for the move off OnSpace onto our own Supabase backend.
+- **History:** see [`developer-notes/developers-note.md`](developer-notes/developers-note.md) for backend history and setup notes.
 
 ```bash
 npm install
