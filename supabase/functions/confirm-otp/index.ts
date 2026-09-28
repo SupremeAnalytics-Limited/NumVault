@@ -223,10 +223,15 @@ async function fetchOTPFromSocially(
   reference: string,
 ): Promise<string | null> {
   try {
-    const { data, error } = await supabase.functions.invoke('socially-proxy', {
-      body: { path: `/request/sms/verification/${reference}/otp`, method: 'GET' },
+    const url = Deno.env.get('SUPABASE_URL') ?? '';
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const res = await fetch(`${url}/functions/v1/socially-proxy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+      body: JSON.stringify({ path: `/request/sms/verification/${reference}/otp`, method: 'GET' }),
     });
-    if (error) { console.warn('socially-proxy error:', error.message); return null; }
+    const data = await res.json();
+    if (!res.ok) { console.warn('socially-proxy error:', res.status, JSON.stringify(data)); return null; }
     const responseField = data?.data?.response;
     if (responseField !== undefined && responseField !== null && String(responseField).trim() !== '') {
       return String(responseField).trim();
