@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
+import { paystackTransferFee } from '../_shared/paystack-fees.ts';
 
 /**
  * approve-payout — approves or holds a lead payout.
@@ -179,7 +180,10 @@ Deno.serve(async (req: Request) => {
       // transfer_attempt migration), so retries use a fresh one.
       const attempt = Number(payout.transfer_attempt ?? 0);
       const transferRef = attempt > 0 ? `${payout_id}-r${attempt}` : payout_id;
-      const amountKobo = Math.round(Number(payout.amount) * 100);
+      // The lead is quoted (and owed) the full payout.amount; Paystack's transfer
+      // fee is deducted from what actually gets wired, not added on top for us.
+      const transferFee = paystackTransferFee(Number(payout.amount));
+      const amountKobo = Math.round((Number(payout.amount) - transferFee) * 100);
       const transferPayload = {
         source: 'balance',
         reason: `NumVault Lead payout — block ${payout.block_number ?? '?'} half ${payout.cycle_number}`,
@@ -245,7 +249,7 @@ Deno.serve(async (req: Request) => {
         await sendParticipantPush(
           admin, payout.participant_id,
           '💸 Payment sent!',
-          `Your payout of ₦${Number(payout.amount).toLocaleString()} has been approved and is on its way to your bank account.`,
+          `Your payout of ₦${(amountKobo / 100).toLocaleString()} (₦${Number(payout.amount).toLocaleString()} minus a ₦${transferFee} Paystack transfer fee) is on its way to your bank account.`,
           { type: 'payout_sent', payout_id, transfer_code: transferCode },
         ).catch((e) => console.warn('Push failed:', e));
 
@@ -280,7 +284,7 @@ Deno.serve(async (req: Request) => {
           await sendParticipantPush(
             admin, payout.participant_id,
             '💸 Payment sent!',
-            `Your payout of ₦${Number(payout.amount).toLocaleString()} has been approved and is on its way to your bank account.`,
+            `Your payout of ₦${(amountKobo / 100).toLocaleString()} (₦${Number(payout.amount).toLocaleString()} minus a ₦${transferFee} Paystack transfer fee) is on its way to your bank account.`,
             { type: 'payout_sent', payout_id, transfer_code: existingCode },
           ).catch(() => {});
 

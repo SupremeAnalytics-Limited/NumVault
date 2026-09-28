@@ -488,10 +488,19 @@ export default function AdminDashboardScreen() {
 
   // ── Payout actions ────────────────────────────────────────────────────────
 
+  // Mirrors supabase/functions/_shared/paystack-fees.ts — keep the two in sync.
+  const paystackTransferFee = (amountNaira: number): number => {
+    const base = amountNaira <= 5_000 ? 10 : amountNaira <= 50_000 ? 25 : 50;
+    const stampDuty = amountNaira >= 10_000 ? 50 : 0;
+    return base + stampDuty;
+  };
+
   const handleApprovePayout = async (payout: ReviewPayout) => {
+    const fee = paystackTransferFee(Number(payout.amount));
+    const net = Number(payout.amount) - fee;
     showAlert(
       `Approve ₦${Number(payout.amount).toLocaleString()}?`,
-      `Block ${payout.block_number ?? '?'} Half ${payout.cycle_number} · ${payout.customers_in_cycle} customers. This will send a Paystack transfer.`,
+      `Block ${payout.block_number ?? '?'} Half ${payout.cycle_number} · ${payout.customers_in_cycle} customers. Staff receives ₦${net.toLocaleString()} (₦${fee} Paystack transfer fee deducted).`,
       [
         { text: 'Cancel', style: 'cancel' },
         {

@@ -52,7 +52,7 @@ NumVault is built so that **money always comes in before it goes out**:
 
 - **Direct purchases:** Paystack splits the payment. The wholesale cost goes straight to our wholesale partner; the ₦1,500 fee lands in our account.
 - **Wallet purchases:** after each purchase the app checks our wholesale balance and, when it runs low, tops it up from money that has **already settled** in our Paystack balance, after first setting aside everything owed to leads.
-- **Lead pay follows revenue:** a lead is paid ₦50,000 when they reach 38 customers (by then those customers have paid us ₦57,000) and ₦50,000 at 76 (₦114,000 collected). Every payout is reviewed before it is sent.
+- **Lead pay follows revenue:** a lead is paid ₦50,000 when they reach 38 customers (by then those customers have paid us ₦57,000) and ₦50,000 at 76 (₦114,000 collected) — Paystack's own transfer fee (currently ₦75) comes out of each payment, so ₦49,925 actually lands in the lead's account. Every payout is reviewed before it is sent.
 - **A lead's first month is unpaid** (qualification), so every new lead brings in ₦114,000 before we pay them anything.
 - **Repeat purchases carry no lead cost:** a lead is paid once per customer. Every later purchase by that customer is the full ₦1,500.
 
@@ -80,7 +80,7 @@ When Lead City is saturated, leads keep finding customers **outside the universi
 
 - **Qualifying (unpaid):** 76 validated customers within 30 days. Progress is saved at 19, 38 and 57; if the 30 days run out, the last checkpoint carries into a new 30 days automatically.
 - **Paid rounds:** six rounds of 76 customers. A round ends at **76 customers or 30 days, whichever comes first**, so fast leads finish sooner. **Each lead runs on their own clock** from the day they join.
-- **Pay:** ₦50,000 at 38 customers, ₦50,000 at 76. A round that ends early by time is paid pro rata (₦100,000 ÷ 76 ≈ ₦1,316 per customer), and the lead re-qualifies.
+- **Pay:** ₦50,000 at 38 customers, ₦50,000 at 76, minus Paystack's transfer fee (currently ₦75 per payment, deducted from what the lead receives — ₦49,925 lands in their account). A round that ends early by time is paid pro rata (₦100,000 ÷ 76 ≈ ₦1,316 per customer, same fee applies), and the lead re-qualifies.
 - **A customer counts** only after a successful paid purchase, once, with their own email.
 - **Contract ends** after six paid rounds.
 

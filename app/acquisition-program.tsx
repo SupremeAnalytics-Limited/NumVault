@@ -71,7 +71,7 @@ const LANDING_STEPS: LandingStep[] = [
       },
       {
         heading: 'How We Pay You',
-        text: 'We pay via Paystack to Nigerian bank accounts (Palmpay, Kuda, Opay). No card details needed. 76 customers = ₦100,000. Two ₦50,000 payments: one at 38 customers, one at 76.',
+        text: 'We pay via Paystack to Nigerian bank accounts (Palmpay, Kuda, Opay). No card details needed. 76 customers = ₦100,000. Two ₦50,000 payments: one at 38 customers, one at 76. Paystack\'s transfer fee (currently ₦75) is deducted from each payment, so you\'ll see ₦49,925 land in your account.',
       },
       {
         heading: 'What It Takes',
@@ -94,7 +94,7 @@ const QUAL_RULES = [
 
 const PAID_RULES = [
   "You earn for every validated customer you refer, whether it is 1 or 76.",
-  "At 38 customers a half payout (₦50,000) goes under review. At 76, the second half (₦50,000) goes under review and your next month starts immediately. Every payout is checked before it is sent.",
+  "At 38 customers a half payout (₦50,000, ₦49,925 after Paystack's transfer fee) goes under review. At 76, the second half goes under review the same way and your next month starts immediately. Every payout is checked before it is sent.",
   "Didn't hit 76 this month? You still get paid for every validated customer. Re-qualify to start again.",
 ];
 
@@ -1245,7 +1245,7 @@ export default function AcquisitionProgramScreen() {
               <Text style={styles.payNoticeTitle}>How your pay works</Text>
               <Text style={styles.payNoticeBody}>
                 <Text style={{ color: GREEN }}>①</Text> Your first month is now running.{'\n'}
-                <Text style={{ color: GREEN }}>②</Text> At 38 customers, ₦50,000 goes under admin review. At 76, another ₦50,000 goes under review and your next month starts immediately.{'\n'}
+                <Text style={{ color: GREEN }}>②</Text> At 38 customers, ₦50,000 goes under admin review (you'll receive ₦49,925 after Paystack's transfer fee). At 76, another ₦50,000 goes under review the same way, and your next month starts immediately.{'\n'}
                 <Text style={{ color: GREEN }}>③</Text> We will push you a notification when each payout is approved.
               </Text>
             </View>
