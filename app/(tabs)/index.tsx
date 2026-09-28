@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/template';
+import { useWallet } from '@/hooks/useWallet';
 import {
   getServiceList, getServicePrice, getCountries, getPackagesForCountry,
   detectCountryRegion, getServicePopularityRank,
@@ -61,6 +62,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
+  const { profile } = useWallet();
 
   const [provider, setProvider] = useState<ProviderCode>('server-b');
 
@@ -311,7 +313,7 @@ export default function HomeScreen() {
   const sheetCat = sheetService ? sheetService.category : null;
   const isSheetOpen = !!(sheetService || sheetPackage);
 
-  const firstName = user?.username?.split(' ')[0] || user?.email?.split('@')[0] || 'there';
+  const firstName = profile?.name?.split(' ')[0] || user?.username?.split(' ')[0] || user?.email?.split('@')[0] || 'there';
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
