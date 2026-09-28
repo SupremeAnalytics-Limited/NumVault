@@ -35,8 +35,9 @@ export default function ProfileScreen() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
 
-  // Admin toggle — defaults to visible so behavior is unchanged until turned off.
-  const [acqProgramVisible, setAcqProgramVisible] = useState(true);
+  // Admin toggle — starts unknown (hidden) so the banner never flashes on
+  // screen before we've confirmed the setting; only shows once fetched true.
+  const [acqProgramVisible, setAcqProgramVisible] = useState<boolean | null>(null);
 
   const isAdmin = user?.email === ADMIN_EMAIL;
 
