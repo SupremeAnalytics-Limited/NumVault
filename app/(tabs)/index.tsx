@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, TextInput, ActivityIndicator, Animated,
-  RefreshControl, SectionList,
+  RefreshControl, SectionList, AppState, AppStateStatus,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -13,6 +13,7 @@ import { useWallet } from '@/hooks/useWallet';
 import {
   getServiceList, getServicePrice, getCountries, getPackagesForCountry,
   detectCountryRegion, getServicePopularityRank,
+  withRetry, getCachedList, setCachedList, HOME_CACHE_KEYS,
   ServiceItem, ServiceCategory, CountryRegion, Country, Package,
 } from '@/services/sociallyService';
 import { PLATFORM_ICONS } from '@/constants/config';
@@ -76,9 +77,22 @@ export default function HomeScreen() {
   const [fetchingPrice, setFetchingPrice] = useState(false);
   const [sheetPriceReady, setSheetPriceReady] = useState(false);
 
+  // Server B — failed-load state, retry button, stale-list banner
+  const [serverBLoadError, setServerBLoadError] = useState(false);
+  const [serverBRetrying, setServerBRetrying] = useState(false);
+  const [showStaleBanner, setShowStaleBanner] = useState(false);
+  const allServicesRef = useRef<ServiceItem[]>([]);
+  const lastServerBLoadAt = useRef<number | null>(null);
+  const serverBLoadFailed = useRef(false);
+  const serverBLoadedOnce = useRef(false);
+
   // Server A
   const [allCountries, setAllCountries] = useState<CountryWithRegion[]>([]);
   const [loadingCountries, setLoadingCountries] = useState(false);
+  const allCountriesRef = useRef<CountryWithRegion[]>([]);
+  const lastServerALoadAt = useRef<number | null>(null);
+  const serverALoadFailed = useRef(false);
+  const serverALoadedOnce = useRef(false);
   const [activeRegion, setActiveRegion] = useState<CountryRegion>('All');
   const [countrySearch, setCountrySearch] = useState('');
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
@@ -102,31 +116,100 @@ export default function HomeScreen() {
     setCountryPackages([]);
     setSheetService(null);
     setSheetPackage(null);
-    if (provider === 'server-b') loadServerB();
-    else loadServerA();
+    if (provider === 'server-b' && !serverBLoadedOnce.current) {
+      serverBLoadedOnce.current = true;
+      hydrateServerB();
+    } else if (provider === 'server-a' && !serverALoadedOnce.current) {
+      serverALoadedOnce.current = true;
+      hydrateServerA();
+    }
   }, [provider]);
+
+  // ── App foreground reload ────────────────────────────────────────────────
+  // Reloads whichever list has already been loaded once, if it's more than
+  // 5 minutes stale or its last attempt failed.
+
+  useEffect(() => {
+    const STALE_MS = 5 * 60 * 1000;
+    const onChange = (state: AppStateStatus) => {
+      if (state !== 'active') return;
+      if (
+        serverBLoadedOnce.current &&
+        (serverBLoadFailed.current || !lastServerBLoadAt.current || Date.now() - lastServerBLoadAt.current > STALE_MS)
+      ) {
+        runServerBLoad('silent');
+      }
+      if (
+        serverALoadedOnce.current &&
+        (serverALoadFailed.current || !lastServerALoadAt.current || Date.now() - lastServerALoadAt.current > STALE_MS)
+      ) {
+        runServerALoad('silent');
+      }
+    };
+    const sub = AppState.addEventListener('change', onChange);
+    return () => sub.remove();
+  }, []);
 
   // ── Server B ──────────────────────────────────────────────────────────────
 
-  const loadServerB = async (isRefresh = false) => {
-    if (isRefresh) { setRefreshing(true); priceCache.current.clear(); }
-    else setLoadingServices(true);
+  const applyAllServices = (items: ServiceItem[]) => {
+    allServicesRef.current = items;
+    setAllServices(items);
+  };
+
+  const fetchServerBList = async (): Promise<ServiceItem[]> => {
+    const items = await getServiceList('server-b');
+    return [...items].sort((a, b) => {
+      const ra = getServicePopularityRank(a.title);
+      const rb = getServicePopularityRank(b.title);
+      if (ra !== rb) return ra - rb;
+      return a.title.localeCompare(b.title);
+    });
+  };
+
+  // mode: 'initial' shows the full-screen loading card (no list yet).
+  // 'refresh' is pull-to-refresh. 'retryButton' is the failed-state Try again
+  // button. 'silent' is a background refresh — no visible loading indicator.
+  const runServerBLoad = async (mode: 'initial' | 'refresh' | 'retryButton' | 'silent') => {
+    if (mode === 'initial') setLoadingServices(true);
+    else if (mode === 'refresh') { setRefreshing(true); priceCache.current.clear(); }
+    else if (mode === 'retryButton') setServerBRetrying(true);
+
     try {
-      const items = await getServiceList('server-b');
-      const sorted = [...items].sort((a, b) => {
-        const ra = getServicePopularityRank(a.title);
-        const rb = getServicePopularityRank(b.title);
-        if (ra !== rb) return ra - rb;
-        return a.title.localeCompare(b.title);
-      });
-      setAllServices(sorted);
+      const sorted = await withRetry(fetchServerBList);
+      applyAllServices(sorted);
+      setServerBLoadError(false);
+      setShowStaleBanner(false);
+      lastServerBLoadAt.current = Date.now();
+      serverBLoadFailed.current = false;
+      setCachedList(HOME_CACHE_KEYS.serverBServices, sorted);
     } catch (e) {
       console.error('Server B load error:', e);
+      serverBLoadFailed.current = true;
+      if (allServicesRef.current.length > 0) setShowStaleBanner(true);
+      else setServerBLoadError(true);
     } finally {
       setLoadingServices(false);
       setRefreshing(false);
+      setServerBRetrying(false);
     }
   };
+
+  const loadServerB = (isRefresh = false) => runServerBLoad(isRefresh ? 'refresh' : 'initial');
+
+  const hydrateServerB = async () => {
+    const cached = await getCachedList<ServiceItem>(HOME_CACHE_KEYS.serverBServices);
+    if (cached && cached.length > 0) {
+      applyAllServices(cached);
+      setLoadingServices(false);
+      runServerBLoad('silent');
+    } else {
+      runServerBLoad('initial');
+    }
+  };
+
+  const retryServerB = () => runServerBLoad('retryButton');
+  const dismissStaleBanner = () => setShowStaleBanner(false);
 
   const serverBSections: ServiceSection[] = React.useMemo(() => {
     const filtered = allServices.filter((s) => {
@@ -157,26 +240,49 @@ export default function HomeScreen() {
 
   // ── Server A ──────────────────────────────────────────────────────────────
 
-  const loadServerA = async () => {
-    setLoadingCountries(true);
+  const fetchServerAList = async (): Promise<CountryWithRegion[]> => {
+    const list = await getCountries('server-a');
+    const enriched: CountryWithRegion[] = list.map((c) => ({
+      ...c,
+      region: detectCountryRegion(c.title),
+    }));
+    enriched.sort((a, b) => {
+      const popOrder: CountryRegion[] = ['Popular', 'Africa', 'Americas', 'Europe', 'Asia', 'Middle East', 'Other'];
+      const ra = popOrder.indexOf(a.region);
+      const rb = popOrder.indexOf(b.region);
+      if (ra !== rb) return ra - rb;
+      return a.title.localeCompare(b.title);
+    });
+    return enriched;
+  };
+
+  const runServerALoad = async (mode: 'initial' | 'silent') => {
+    if (mode === 'initial') setLoadingCountries(true);
     try {
-      const list = await getCountries('server-a');
-      const enriched: CountryWithRegion[] = list.map((c) => ({
-        ...c,
-        region: detectCountryRegion(c.title),
-      }));
-      enriched.sort((a, b) => {
-        const popOrder: CountryRegion[] = ['Popular', 'Africa', 'Americas', 'Europe', 'Asia', 'Middle East', 'Other'];
-        const ra = popOrder.indexOf(a.region);
-        const rb = popOrder.indexOf(b.region);
-        if (ra !== rb) return ra - rb;
-        return a.title.localeCompare(b.title);
-      });
+      const enriched = await withRetry(fetchServerAList);
+      allCountriesRef.current = enriched;
       setAllCountries(enriched);
+      lastServerALoadAt.current = Date.now();
+      serverALoadFailed.current = false;
+      setCachedList(HOME_CACHE_KEYS.serverACountries, enriched);
     } catch (e) {
       console.error('Server A load error:', e);
+      serverALoadFailed.current = true;
     } finally {
-      setLoadingCountries(false);
+      if (mode === 'initial') setLoadingCountries(false);
+    }
+  };
+
+  const loadServerA = () => runServerALoad('initial');
+
+  const hydrateServerA = async () => {
+    const cached = await getCachedList<CountryWithRegion>(HOME_CACHE_KEYS.serverACountries);
+    if (cached && cached.length > 0) {
+      allCountriesRef.current = cached;
+      setAllCountries(cached);
+      runServerALoad('silent');
+    } else {
+      runServerALoad('initial');
     }
   };
 
@@ -351,26 +457,6 @@ export default function HomeScreen() {
       {/* ═══ SERVER B ═══ */}
       {provider === 'server-b' && (
         <>
-          {/* Search */}
-          <View style={styles.searchWrap}>
-            <View style={styles.searchBar}>
-              <MaterialIcons name="search" size={18} color={Colors.textMuted} />
-              <TextInput
-                style={styles.searchInput}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search TikTok, WhatsApp, PayPal..."
-                placeholderTextColor={Colors.textMuted}
-                returnKeyType="search"
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <MaterialIcons name="close" size={16} color={Colors.textMuted} />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
           {loadingServices ? (
             <View style={styles.loadingContainer}>
               <View style={styles.loadingCard}>
@@ -378,8 +464,66 @@ export default function HomeScreen() {
                 <Text style={styles.loadingTitle}>NumVault.Cloud</Text>
               </View>
             </View>
+          ) : serverBLoadError ? (
+            <ScrollView
+              contentContainerStyle={styles.fullScreenScroll}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={() => loadServerB(true)} tintColor={Colors.primary} colors={[Colors.primary]} />
+              }
+            >
+              <View style={styles.emptyIcon}>
+                <MaterialIcons name="cloud-off" size={32} color={Colors.textMuted} />
+              </View>
+              <Text style={styles.emptyTitle}>Connecting to Cloud</Text>
+              <Text style={styles.emptySub}>
+                We could not reach the NumVault cloud just now. It usually sorts itself out in a moment.
+              </Text>
+              <TouchableOpacity
+                style={[styles.retryBtn, serverBRetrying && styles.retryBtnDisabled]}
+                onPress={retryServerB}
+                disabled={serverBRetrying}
+                activeOpacity={0.85}
+              >
+                {serverBRetrying
+                  ? <ActivityIndicator color={Colors.black} size="small" />
+                  : <Text style={styles.retryBtnText}>Try again</Text>
+                }
+              </TouchableOpacity>
+            </ScrollView>
           ) : (
             <>
+              {showStaleBanner && (
+                <View style={styles.staleBanner}>
+                  <MaterialIcons name="cloud-queue" size={16} color={Colors.warning} />
+                  <Text style={styles.staleBannerText}>
+                    Showing your last saved list. The cloud is a little slow, pull down to refresh.
+                  </Text>
+                  <TouchableOpacity onPress={dismissStaleBanner} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <MaterialIcons name="close" size={16} color={Colors.warning} />
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Search */}
+              <View style={styles.searchWrap}>
+                <View style={styles.searchBar}>
+                  <MaterialIcons name="search" size={18} color={Colors.textMuted} />
+                  <TextInput
+                    style={styles.searchInput}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    placeholder="Search TikTok, WhatsApp, PayPal..."
+                    placeholderTextColor={Colors.textMuted}
+                    returnKeyType="search"
+                  />
+                  {searchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <MaterialIcons name="close" size={16} color={Colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
               {/* Category chips — outer View allocates vertical space so pills are never clipped */}
               <View style={styles.chipWrap}>
                 <ScrollView
@@ -410,7 +554,12 @@ export default function HomeScreen() {
               </View>
 
               {serverBSections.every((s) => s.data.length === 0) || serverBSections.length === 0 ? (
-                <View style={styles.emptyCenter}>
+                <ScrollView
+                  contentContainerStyle={styles.fullScreenScroll}
+                  refreshControl={
+                    <RefreshControl refreshing={refreshing} onRefresh={() => loadServerB(true)} tintColor={Colors.primary} colors={[Colors.primary]} />
+                  }
+                >
                   <View style={styles.emptyIcon}>
                     <MaterialIcons name="search-off" size={32} color={Colors.textMuted} />
                   </View>
@@ -421,7 +570,7 @@ export default function HomeScreen() {
                   <TouchableOpacity style={styles.clearBtn} onPress={() => { setSearchQuery(''); setActiveCat('All'); }}>
                     <Text style={styles.clearBtnText}>Clear filters</Text>
                   </TouchableOpacity>
-                </View>
+                </ScrollView>
               ) : (
                 <SectionList
                   sections={serverBSections}
@@ -803,8 +952,8 @@ const styles = StyleSheet.create({
   cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   cardBuyLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: FontWeight.medium },
 
-  // Empty
-  emptyCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md, paddingHorizontal: Spacing.xl },
+  // Empty / full-screen error — content grows to fill so pull-to-refresh works
+  fullScreenScroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md, paddingHorizontal: Spacing.xl },
   emptyIcon: {
     width: 64, height: 64, borderRadius: 32, backgroundColor: Colors.surface,
     borderWidth: 1, borderColor: Colors.surfaceBorder, alignItems: 'center', justifyContent: 'center',
@@ -816,6 +965,21 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md, paddingHorizontal: Spacing.lg, paddingVertical: 10,
   },
   clearBtnText: { color: Colors.textSecondary, fontSize: FontSize.sm },
+  retryBtn: {
+    backgroundColor: Colors.primary, borderRadius: Radius.md,
+    paddingHorizontal: Spacing.xl, paddingVertical: 12, minWidth: 140, alignItems: 'center',
+  },
+  retryBtnDisabled: { opacity: 0.6 },
+  retryBtnText: { color: Colors.black, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+
+  // Stale-list banner
+  staleBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.warningMuted, borderWidth: 1, borderColor: 'rgba(255,184,0,0.3)',
+    borderRadius: Radius.md, marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
+    paddingHorizontal: Spacing.md, paddingVertical: 10,
+  },
+  staleBannerText: { flex: 1, color: Colors.warning, fontSize: FontSize.xs, lineHeight: 16 },
 
   // Server A layout
   serverALayout: { flex: 1, flexDirection: 'row' },

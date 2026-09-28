@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSupabaseClient } from '@/template';
 import { FLAT_ACQUISITION_FEE as DEFAULT_FLAT_ACQUISITION_FEE } from '@/constants/config';
 import { getSetting } from '@/services/settingsService';
@@ -336,5 +337,53 @@ export async function getOTP(reference: string): Promise<{ otp: string | null; m
     return { otp, mobile_number: mobileNumber };
   } catch {
     return { otp: null, mobile_number: null };
+  }
+}
+
+// ── Home screen resilience: retry + last-good-list cache ────────────────────
+
+export const HOME_CACHE_KEYS = {
+  serverBServices: 'home_server_b_services_v1',
+  serverACountries: 'home_server_a_countries_v1',
+} as const;
+
+/**
+ * Retries fn on failure only (never on an empty successful result), waiting
+ * delaysMs[i] between attempt i and i+1. Throws the last error once the
+ * delays are exhausted.
+ */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  delaysMs: number[] = [1000, 2000, 4000],
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= delaysMs.length; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      if (attempt === delaysMs.length) break;
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+    }
+  }
+  throw lastError;
+}
+
+export async function getCachedList<T>(key: string): Promise<T[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setCachedList<T>(key: string, items: T[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(key, JSON.stringify(items));
+  } catch {
+    // Best-effort cache — a write failure should never block the UI.
   }
 }
