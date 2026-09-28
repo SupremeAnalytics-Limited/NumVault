@@ -16,6 +16,7 @@ import { Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 import { trackLogout, trackAccountDeleted, trackSupportInteraction } from '@/services/sentryService';
+import { getSetting } from '@/services/settingsService';
 
 const ADMIN_EMAIL = 'oluwaferanmionabanjo@gmail.com';
 const supabase = getSupabaseClient();
@@ -34,13 +35,18 @@ export default function ProfileScreen() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
 
-
+  // Admin toggle — defaults to visible so behavior is unchanged until turned off.
+  const [acqProgramVisible, setAcqProgramVisible] = useState(true);
 
   const isAdmin = user?.email === ADMIN_EMAIL;
 
   useEffect(() => {
     if (user) refreshProfile();
   }, [user]);
+
+  useEffect(() => {
+    getSetting<boolean>('acquisition_program_visible', true).then((v) => setAcqProgramVisible(!!v));
+  }, []);
 
   const handleUpdateName = async () => {
     if (!newName.trim()) return;
@@ -119,26 +125,28 @@ export default function ProfileScreen() {
           <Text style={styles.profileEmail}>{user?.email}</Text>
         </View>
 
-        {/* ── Acquisition Program Banner ── */}
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={styles.programBanner}
-            onPress={async () => {
-              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              router.push('/acquisition-program');
-            }}
-            activeOpacity={0.85}
-          >
-            <View style={styles.programBannerIcon}>
-              <MaterialIcons name="groups" size={22} color={Colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.programBannerTitle}>Acquisition Program for Students</Text>
-              <Text style={styles.programBannerSub}>Acquire customers · Qualify for paid Lead opportunity</Text>
-            </View>
-            <MaterialIcons name="chevron-right" size={20} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
+        {/* ── Acquisition Program Banner — admin-toggleable ── */}
+        {acqProgramVisible ? (
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.programBanner}
+              onPress={async () => {
+                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                router.push('/acquisition-program');
+              }}
+              activeOpacity={0.85}
+            >
+              <View style={styles.programBannerIcon}>
+                <MaterialIcons name="groups" size={22} color={Colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.programBannerTitle}>Acquisition Program for Students</Text>
+                <Text style={styles.programBannerSub}>Acquire customers · Qualify for paid Lead opportunity</Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={Colors.primary} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {/* Menu items */}
         <View style={styles.section}>

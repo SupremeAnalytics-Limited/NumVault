@@ -172,6 +172,8 @@ export default function AdminDashboardScreen() {
   const [appOnboardingToggleSaving, setAppOnboardingToggleSaving] = useState(false);
   const [acqLandingForceEverySession, setAcqLandingForceEverySession] = useState(true);
   const [acqLandingToggleSaving, setAcqLandingToggleSaving] = useState(false);
+  const [acqProgramVisible, setAcqProgramVisible] = useState(true);
+  const [acqProgramVisibleToggleSaving, setAcqProgramVisibleToggleSaving] = useState(false);
   const [marginValue, setMarginValue] = useState('1500');
   const [marginDirty, setMarginDirty] = useState(false);
   const [marginSaving, setMarginSaving] = useState(false);
@@ -183,13 +185,14 @@ export default function AdminDashboardScreen() {
   const loadSettings = useCallback(async () => {
     setJobAdLoading(true);
     try {
-      const [scale, steps, margin, tourForce, appOnboardingForce, acqLandingForce] = await Promise.all([
+      const [scale, steps, margin, tourForce, appOnboardingForce, acqLandingForce, acqProgramVisibleSetting] = await Promise.all([
         getSetting<boolean>('scale_mode_enabled', false),
         getSetting<JobAdStep[] | null>('job_ad_content', null),
         getSetting<number>('flat_acquisition_fee', 1500),
         getSetting<boolean>('dashboard_tour_force_every_session', false),
         getSetting<boolean>('app_onboarding_force_every_session', true),
         getSetting<boolean>('acquisition_landing_force_every_session', true),
+        getSetting<boolean>('acquisition_program_visible', true),
       ]);
       setScaleMode(!!scale);
       setJobAdSteps(steps ?? DEFAULT_JOB_AD_STEPS);
@@ -199,6 +202,7 @@ export default function AdminDashboardScreen() {
       setTourForceEverySession(!!tourForce);
       setAppOnboardingForceEverySession(!!appOnboardingForce);
       setAcqLandingForceEverySession(!!acqLandingForce);
+      setAcqProgramVisible(!!acqProgramVisibleSetting);
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -266,6 +270,21 @@ export default function AdminDashboardScreen() {
       showAlert('Could not save', e.message || 'Failed to update the job pitch setting.');
     } finally {
       setAcqLandingToggleSaving(false);
+    }
+  };
+
+  const toggleAcqProgramVisible = async (value: boolean) => {
+    setAcqProgramVisibleToggleSaving(true);
+    const previous = acqProgramVisible;
+    setAcqProgramVisible(value); // optimistic
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('acquisition_program_visible', value);
+    } catch (e: any) {
+      setAcqProgramVisible(previous);
+      showAlert('Could not save', e.message || 'Failed to update the acquisition program visibility.');
+    } finally {
+      setAcqProgramVisibleToggleSaving(false);
     }
   };
 
@@ -1142,6 +1161,32 @@ export default function AdminDashboardScreen() {
               </View>
               <Text style={settingsStyles.hint}>
                 Takes effect immediately — no app update needed. The job text itself is still edited below.
+              </Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Acquisition program in Profile</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {acqProgramVisible
+                      ? 'ON — the "Acquisition Program for Students" banner shows in the Profile tab, same as today.'
+                      : 'OFF — the banner is hidden from Profile. Everything else on that screen stays the same, and existing leads keep their own dashboard access.'}
+                  </Text>
+                </View>
+                {acqProgramVisibleToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={acqProgramVisible}
+                    onValueChange={toggleAcqProgramVisible}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={acqProgramVisible ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.hint}>
+                Takes effect immediately — no app update needed.
               </Text>
             </View>
 
