@@ -11,6 +11,7 @@ import * as Haptics from 'expo-haptics';
 import { useAuth, useAlert } from '@/template';
 import { waitForSession, setPasswordWithRetry } from '@/services/authHelpers';
 import { applyReferralCode } from '@/services/acquisitionService';
+import { suggestEmailFix } from '@/services/emailTypo';
 import {
   trackSignupStarted, trackSignupOtpSent, trackSignupCompleted, trackSignupFailed,
   trackLoginStarted, trackLoginCompleted, trackLoginFailed,
@@ -49,6 +50,18 @@ export default function LoginScreen() {
   };
 
   // ── Register handlers ──────────────────────────────────────────────────────
+
+  const emailSuggestion = suggestEmailFix(email);
+
+  // Before emailing a code, offer the corrected address if the email looks
+  // mistyped (e.g. "gmail.comc"); a typo means the code never arrives.
+  const confirmEmail = (send: () => void) => {
+    if (!emailSuggestion) return send();
+    showAlert('Check your email', `Did you mean ${emailSuggestion}?`, [
+      { text: `Use ${emailSuggestion}`, onPress: () => setEmail(emailSuggestion) },
+      { text: 'Keep as typed', onPress: send },
+    ]);
+  };
 
   const handleSendOTP = async () => {
     if (!email.trim()) {
@@ -207,7 +220,7 @@ export default function LoginScreen() {
   const handleCTA = () => {
     if (mode === 'login') return handleLogin();
     if (mode === 'register') return handleRegister();
-    if (mode === 'forgot') return forgotOtpSent ? handleResetPassword() : handleForgotSendOTP();
+    if (mode === 'forgot') return forgotOtpSent ? handleResetPassword() : confirmEmail(handleForgotSendOTP);
   };
 
   const ctaLabel = operationLoading ? 'Please wait...' :
@@ -295,6 +308,13 @@ export default function LoginScreen() {
                   autoCorrect={false}
                 />
               </View>
+              {emailSuggestion && (
+                <TouchableOpacity onPress={() => setEmail(emailSuggestion)} hitSlop={8}>
+                  <Text style={styles.emailHint}>
+                    Did you mean <Text style={styles.emailHintStrong}>{emailSuggestion}</Text>? Tap to fix.
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Register: password fields */}
@@ -381,7 +401,7 @@ export default function LoginScreen() {
             {mode === 'register' && !otpSent && (
               <TouchableOpacity
                 style={styles.otpBtn}
-                onPress={handleSendOTP}
+                onPress={() => confirmEmail(handleSendOTP)}
                 disabled={operationLoading}
                 activeOpacity={0.8}
               >
@@ -597,6 +617,15 @@ const styles = StyleSheet.create({
   },
   inputGroup: {
     gap: Spacing.xs,
+  },
+  emailHint: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    marginTop: Spacing.xs,
+  },
+  emailHintStrong: {
+    color: Colors.primary,
+    fontWeight: FontWeight.semibold,
   },
   label: {
     color: Colors.textSecondary,
