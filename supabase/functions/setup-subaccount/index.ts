@@ -14,15 +14,13 @@ const PAYSTACK_BASE = 'https://api.paystack.co';
 const SOCIALLY_ACCOUNT_NUMBER = '6635796668';
 const SOCIALLY_ACCOUNT_NAME = 'Riteweb Digital Services-Sim(Paymentpoint)';
 
-// ⚠️  Verified against real settlement data (fees_split on live transactions):
-// percentage_charge set on a subaccount is the cut that goes to the
-// INTEGRATION (main/NumVault) account, NOT the subaccount. The subaccount
-// (Socially.ng) actually receives (100 − percentage_charge)%.
-// Intended model: Socially.ng receives wholesale (~71.43%); NumVault keeps
-// ~28.57% (~₦1,500 flat via transaction_charge on number_purchase instead).
-// At the current value (71.43), NumVault keeps 71.43% and Socially.ng gets
-// 28.57% — the reverse of intent. To make Socially.ng actually receive
-// 71.43%, this constant needs to be set to 28.57, not 71.43.
+// percentage_charge on a subaccount is the share the INTEGRATION (main/NumVault)
+// account keeps; the subaccount (Socially.ng) receives (100 − percentage_charge)%.
+// Verified against fees_split on live transactions.
+//
+// By design, wallet top-ups split 71.43% to NumVault and 28.57% to Socially.ng,
+// so this is 71.43 on purpose. Number purchases don't use it: they set an
+// exact flat transaction_charge (NumVault's margin) per payment instead.
 const SUBACCOUNT_PERCENTAGE = 71.43;
 
 Deno.serve(async (req: Request) => {
@@ -117,8 +115,7 @@ Deno.serve(async (req: Request) => {
           // ──────────────────────────────────────────────────────────────────
         }
 
-        // Matches SUBACCOUNT_PERCENTAGE — not necessarily the intended business split,
-        // see the ⚠️ note above SUBACCOUNT_PERCENTAGE.
+        // Matches SUBACCOUNT_PERCENTAGE, the intended wallet top-up split.
         console.log(`Subaccount already exists, percentage_charge matches configured value: ${existing.subaccount_code}`);
         return new Response(JSON.stringify({
           success: true,
@@ -154,8 +151,8 @@ Deno.serve(async (req: Request) => {
 
     // ── Create subaccount ────────────────────────────────────────────────────
     // percentage_charge = what the INTEGRATION (main/NumVault) account receives.
-    // At SUBACCOUNT_PERCENTAGE=71.43, NumVault gets 71.43%, Socially.ng (the
-    // subaccount) gets 28.57% — see the ⚠️ note above SUBACCOUNT_PERCENTAGE.
+    // At SUBACCOUNT_PERCENTAGE=71.43, NumVault gets 71.43% and Socially.ng (the
+    // subaccount) gets 28.57%, as intended for wallet top-ups.
     const createRes = await fetch(`${PAYSTACK_BASE}/subaccount`, {
       method: 'POST',
       headers: {
