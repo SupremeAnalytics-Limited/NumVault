@@ -21,17 +21,9 @@ const SCREENS = [
   {
     image: require('@/assets/images/nv_s1.png'),
     tag: null as null | string,
-    headline: 'Your number is more exposed than you',
-    body: 'Every sign-up form, every stranger you meet online, every app you download — they all want your personal phone number, with the possibility of it becoming another thing tied to your identity that can get leaked or get sold. Privacy shouldn\'t be optional by default',
-    steps: null as null | string[],
-    bulletSections: null as null | { intro: string; items: string[] }[],
-  },
-  {
-    image: require('@/assets/images/nv_s2.png'),
-    tag: null as null | string,
     headline: 'Use a virtual number instead.',
     body: null as null | string,
-    steps: null,
+    steps: null as null | string[],
     bulletSections: [
       {
         intro: 'Every app and sign-up asking for your real number creates another opportunity for:',
@@ -41,7 +33,15 @@ const SCREENS = [
         intro: 'Use a virtual number for:',
         items: ['Business separation', 'Project separation', 'Developer testing', 'Online services', 'More'],
       },
-    ] as { intro: string; items: string[] }[],
+    ] as null | { intro: string; items: string[] }[],
+  },
+  {
+    image: require('@/assets/images/nv_s2.png'),
+    tag: null as null | string,
+    headline: 'No subscription, No rent. Pay as you go.',
+    body: 'Choose from 2,300+ apps & services and pay only when you need a number without being locked into a monthly subscription. Your purchased number belongs to you for that service.' as null | string,
+    steps: null,
+    bulletSections: null,
   },
   {
     image: require('@/assets/images/nv_s3.png'),
