@@ -28,8 +28,8 @@ const SCREENS = [
   {
     image: require('@/assets/images/nv_s2.png'),
     tag: null as null | string,
-    headline: 'No subscription, No rent. Pay as you go.',
-    body: 'Choose from 2,300+ apps & services and pay only when you need a number without being locked into a monthly subscription. Your purchased number belongs to you for that service.',
+    headline: 'Use a virtual number instead.',
+    body: 'Every app and sign-up asking for your real number creates another opportunity for spam, unwanted calls, data profiling, and other risks. A virtual number keeps your personal number separate while giving you flexibility for business separation, project separation, developer testing, and more.',
     steps: null,
   },
   {
