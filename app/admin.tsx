@@ -187,11 +187,13 @@ export default function AdminDashboardScreen() {
   const [tabToursAlwaysShowSaving, setTabToursAlwaysShowSaving] = useState(false);
   const [checkoutIntroAlwaysShow, setCheckoutIntroAlwaysShow] = useState(false);
   const [checkoutIntroAlwaysShowSaving, setCheckoutIntroAlwaysShowSaving] = useState(false);
+  const [financeEnabled, setFinanceEnabled] = useState(true);
+  const [financeEnabledSaving, setFinanceEnabledSaving] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setJobAdLoading(true);
     try {
-      const [scale, steps, margin, tourForce, appOnboardingForce, acqLandingForce, acqProgramVisibleSetting, skipQualificationSetting, tabToursAlwaysShowSetting, checkoutIntroAlwaysShowSetting] = await Promise.all([
+      const [scale, steps, margin, tourForce, appOnboardingForce, acqLandingForce, acqProgramVisibleSetting, skipQualificationSetting, tabToursAlwaysShowSetting, checkoutIntroAlwaysShowSetting, financeEnabledSetting] = await Promise.all([
         getSetting<boolean>('scale_mode_enabled', false),
         getSetting<JobAdStep[] | null>('job_ad_content', null),
         getSetting<number>('flat_acquisition_fee', 1500),
@@ -202,6 +204,7 @@ export default function AdminDashboardScreen() {
         getSetting<boolean>('skip_qualification_month', false),
         getSetting<boolean>('tab_tours_always_show', false),
         getSetting<boolean>('checkout_intro_always_show', false),
+        getSetting<boolean>('finance_enabled', true),
       ]);
       setScaleMode(!!scale);
       setJobAdSteps(steps ?? DEFAULT_JOB_AD_STEPS);
@@ -215,6 +218,7 @@ export default function AdminDashboardScreen() {
       setSkipQualificationMonth(!!skipQualificationSetting);
       setTabToursAlwaysShow(!!tabToursAlwaysShowSetting);
       setCheckoutIntroAlwaysShow(!!checkoutIntroAlwaysShowSetting);
+      setFinanceEnabled(financeEnabledSetting !== false);
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -342,6 +346,21 @@ export default function AdminDashboardScreen() {
       showAlert('Could not save', e.message || 'Failed to update the checkout intro setting.');
     } finally {
       setCheckoutIntroAlwaysShowSaving(false);
+    }
+  };
+
+  const toggleFinanceEnabled = async (value: boolean) => {
+    setFinanceEnabledSaving(true);
+    const previous = financeEnabled;
+    setFinanceEnabled(value);
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('finance_enabled', value);
+    } catch (e: any) {
+      setFinanceEnabled(previous);
+      showAlert('Could not save', e.message || 'Failed to update the finance setting.');
+    } finally {
+      setFinanceEnabledSaving(false);
     }
   };
 
@@ -1250,6 +1269,30 @@ export default function AdminDashboardScreen() {
               <Text style={settingsStyles.desc}>On: checkout tour repeats on every purchase (useful for testing). Off: shows once at first purchase, then stops.</Text>
             </View>
 
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Finance category</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {financeEnabled
+                      ? 'ON — Finance services (e.g. PayPal) are visible in search, category pills, and the home feed.'
+                      : 'OFF — Finance services are hidden from search, category pills, and the home feed.'}
+                  </Text>
+                </View>
+                {financeEnabledSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={financeEnabled}
+                    onValueChange={toggleFinanceEnabled}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={financeEnabled ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: Finance pill and PayPal in search placeholder appear for all users. Off: Finance is fully hidden.</Text>
+            </View>
+
             {/* ── Ambassador program ── */}
             <Text style={settingsStyles.sectionHeader}>Ambassador program</Text>
 
@@ -1640,8 +1683,9 @@ const settingsStyles = StyleSheet.create({
   hint: { fontSize: 11, color: MUTED, lineHeight: 16, marginTop: 4 },
   desc: { fontSize: 11, color: MUTED, lineHeight: 16, marginTop: 2 },
   sectionHeader: {
-    fontSize: 11, fontWeight: '700', color: MUTED, letterSpacing: 1,
+    fontSize: 11, fontWeight: '800', color: GREEN, letterSpacing: 1.5,
     textTransform: 'uppercase', marginTop: 8, marginBottom: 4, paddingHorizontal: 2,
+    textShadowColor: 'rgba(74,222,128,0.5)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 8,
   },
   resetLink: { fontSize: 12, color: ORANGE, fontWeight: '600' },
   marginInputWrap: {
