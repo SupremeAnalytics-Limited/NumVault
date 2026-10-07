@@ -138,14 +138,10 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (
-      tabToursAlwaysShow !== null &&
-      profile &&
-      !homeTourShownRef.current
-    ) {
-      homeTourShownRef.current = true;
-      const tourSeen = profile.tours_seen?.home;
+    if (tabToursAlwaysShow !== null && !homeTourShownRef.current) {
+      const tourSeen = profile?.tours_seen?.home;
       if (tabToursAlwaysShow || !tourSeen) {
+        homeTourShownRef.current = true;
         setShowHomeTour(true);
       }
     }
