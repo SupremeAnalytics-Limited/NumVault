@@ -20,6 +20,7 @@ const { width, height } = Dimensions.get('window');
 const SCREENS = [
   {
     image: require('@/assets/images/nv_s1.png'),
+    coverBottom: false,
     tag: null as null | string,
     headline: 'Use a virtual number instead.',
     body: null as null | string,
@@ -37,6 +38,7 @@ const SCREENS = [
   },
   {
     image: require('@/assets/images/nv_s2.png'),
+    coverBottom: false,
     tag: null as null | string,
     headline: '2,300+ apps & services',
     body: null as null | string,
@@ -57,6 +59,7 @@ const SCREENS = [
   },
   {
     image: require('@/assets/images/nv_s3.png'),
+    coverBottom: true,
     tag: null,
     headline: "Here's exactly how it works",
     body: null,
@@ -146,6 +149,7 @@ export default function OnboardingScreen() {
               transition={300}
             />
             <View style={styles.gradient} />
+            {s.coverBottom && <View style={styles.imageBottomCover} />}
           </View>
         ))}
       </ScrollView>
@@ -261,6 +265,15 @@ const styles = StyleSheet.create({
     height: height * 0.08,
     backgroundColor: Colors.background,
     opacity: 0.6,
+  },
+  imageBottomCover: {
+    position: 'absolute',
+    bottom: height * 0.08,
+    left: 0,
+    right: 0,
+    height: height * 0.22,
+    backgroundColor: Colors.background,
+    opacity: 0.94,
   },
   bottomCard: {
     backgroundColor: Colors.background,
