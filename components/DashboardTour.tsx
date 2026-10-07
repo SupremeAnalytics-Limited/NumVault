@@ -6,12 +6,12 @@ import {
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const TOOLTIP_MARGIN = 12;
 const HIGHLIGHT_PADDING = 8;
 
 export type TourStep = {
-  ref: React.RefObject<View | null>;
+  ref?: React.RefObject<View | null>;
   title: string;
   body: string;
 };
@@ -19,22 +19,25 @@ export type TourStep = {
 type Props = {
   visible: boolean;
   steps: TourStep[];
-  scrollViewRef: React.RefObject<ScrollView | null>;
+  scrollViewRef?: React.RefObject<ScrollView | null> | null;
   onComplete: () => void;
+  skippable?: boolean;
+  onSkip?: () => void;
 };
 
 type Rect = { x: number; y: number; width: number; height: number };
 
 /**
- * Compulsory, sequential coach-mark: scrolls to and highlights each real
- * card in order with an explanation, blocking the rest of the screen until
- * "Next" is tapped on every step. No skip, no tap-outside-to-dismiss — by
- * design, per the ask: force the walkthrough once, so the numbers on this
- * screen (validated customers, checkpoints, cycles...) aren't a mystery.
+ * Sequential coach-mark overlay. When a step has no ref the tooltip is
+ * centered on screen with no highlight box. When skippable=true a Skip
+ * button is shown alongside Next/Got it.
  */
-export default function DashboardTour({ visible, steps, scrollViewRef, onComplete }: Props) {
+export default function DashboardTour({
+  visible, steps, scrollViewRef, onComplete, skippable = false, onSkip,
+}: Props) {
   const [stepIndex, setStepIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
+  const [stepKey, setStepKey] = useState(0);
   const [measuring, setMeasuring] = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
   const glow = useRef(new Animated.Value(0)).current;
@@ -52,52 +55,50 @@ export default function DashboardTour({ visible, steps, scrollViewRef, onComplet
   const glowLoop = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    if (!rect) return;
-    // fade shares a node with glow's borderColor animation below (the
-    // highlight box), so both must run on the JS driver — mixing a
-    // natively-driven and JS-driven animated value on the same Animated.View
-    // is unreliable in release builds.
     fade.setValue(0);
     Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: false }).start();
 
-    glowLoop.current?.stop();
-    glow.setValue(0);
-    glowLoop.current = Animated.loop(
-      Animated.sequence([
-        Animated.timing(glow, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
-        Animated.timing(glow, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
-      ]),
-    );
-    glowLoop.current.start();
+    if (rect) {
+      glowLoop.current?.stop();
+      glow.setValue(0);
+      glowLoop.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(glow, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+          Animated.timing(glow, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+        ]),
+      );
+      glowLoop.current.start();
+    } else {
+      glowLoop.current?.stop();
+    }
 
     return () => { glowLoop.current?.stop(); };
-  }, [rect]);
+  }, [stepKey]);
 
   const measureAndScrollToStep = (index: number) => {
     const step = steps[index];
-    if (!step?.ref.current) { setRect(null); return; }
+    if (!step?.ref?.current) {
+      setRect(null);
+      setStepKey((k) => k + 1);
+      return;
+    }
     setMeasuring(true);
 
     step.ref.current.measureInWindow((x, y, width, height) => {
-      // Bring the card into a comfortable viewing band (upper-middle of screen)
-      // before taking the final measurement used to draw the highlight.
       const targetBand = SCREEN_HEIGHT * 0.32;
       const delta = y - targetBand;
-      if (Math.abs(delta) > 24 && scrollViewRef.current) {
-        // We don't track absolute scroll offset here, so nudge by the on-screen
-        // delta — accurate enough since we re-measure after the animation settles.
-        scrollViewRef.current.scrollTo({
-          y: Math.max(0, delta),
-          animated: true,
-        });
+      if (Math.abs(delta) > 24 && scrollViewRef?.current) {
+        scrollViewRef.current.scrollTo({ y: Math.max(0, delta), animated: true });
         setTimeout(() => {
-          step.ref.current?.measureInWindow((x2, y2, w2, h2) => {
+          step.ref!.current?.measureInWindow((x2, y2, w2, h2) => {
             setRect({ x: x2, y: y2, width: w2, height: h2 });
+            setStepKey((k) => k + 1);
             setMeasuring(false);
           });
         }, 380);
       } else {
         setRect({ x, y, width, height });
+        setStepKey((k) => k + 1);
         setMeasuring(false);
       }
     });
@@ -117,21 +118,25 @@ export default function DashboardTour({ visible, steps, scrollViewRef, onComplet
     }
   };
 
-  // Position the tooltip above or below the highlighted card, whichever fits.
-  const spaceBelow = rect ? SCREEN_HEIGHT - (rect.y + rect.height) : 0;
-  const placeBelow = rect ? spaceBelow > 220 : true;
-  const tooltipTop = rect
-    ? placeBelow
-      ? rect.y + rect.height + HIGHLIGHT_PADDING + TOOLTIP_MARGIN
-      : undefined
-    : undefined;
-  const tooltipBottom = rect && !placeBelow
-    ? SCREEN_HEIGHT - (rect.y - HIGHLIGHT_PADDING) + TOOLTIP_MARGIN
-    : undefined;
+  const handleSkip = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onSkip?.();
+  };
+
+  let tooltipTop: number | undefined;
+  let tooltipBottom: number | undefined;
+
+  if (rect) {
+    const spaceBelow = SCREEN_HEIGHT - (rect.y + rect.height);
+    const placeBelow = spaceBelow > 220;
+    tooltipTop = placeBelow ? rect.y + rect.height + HIGHLIGHT_PADDING + TOOLTIP_MARGIN : undefined;
+    tooltipBottom = !placeBelow ? SCREEN_HEIGHT - (rect.y - HIGHLIGHT_PADDING) + TOOLTIP_MARGIN : undefined;
+  } else {
+    tooltipTop = SCREEN_HEIGHT / 2 - 120;
+  }
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="auto">
-      {/* Full-screen blocking backdrop — no tap-outside dismiss by design */}
       <View style={styles.backdrop} />
 
       {rect && !measuring ? (
@@ -164,9 +169,20 @@ export default function DashboardTour({ visible, steps, scrollViewRef, onComplet
         <Text style={styles.stepCounter}>{stepIndex + 1} of {steps.length}</Text>
         <Text style={styles.title}>{step.title}</Text>
         <Text style={styles.body}>{step.body}</Text>
-        <TouchableOpacity style={styles.nextBtn} onPress={handleNext} activeOpacity={0.85}>
-          <Text style={styles.nextBtnText}>{isLast ? "Got it" : 'Next'}</Text>
-        </TouchableOpacity>
+        <View style={styles.btnRow}>
+          {skippable && (
+            <TouchableOpacity style={styles.skipBtn} onPress={handleSkip} activeOpacity={0.85}>
+              <Text style={styles.skipBtnText}>Skip</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={[styles.nextBtn, skippable && styles.nextBtnFlex]}
+            onPress={handleNext}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.nextBtnText}>{isLast ? 'Got it' : 'Next'}</Text>
+          </TouchableOpacity>
+        </View>
       </Animated.View>
     </View>
   );
@@ -208,12 +224,27 @@ const styles = StyleSheet.create({
   },
   title: { color: Colors.text, fontSize: FontSize.md, fontWeight: FontWeight.bold },
   body: { color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 20 },
-  nextBtn: {
+  btnRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
     marginTop: Spacing.sm,
+  },
+  skipBtn: {
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    borderRadius: Radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: Spacing.lg,
+    alignItems: 'center',
+  },
+  skipBtnText: { color: Colors.textSecondary, fontWeight: FontWeight.semibold, fontSize: FontSize.sm },
+  nextBtn: {
     backgroundColor: Colors.primary,
     borderRadius: Radius.md,
     paddingVertical: 12,
+    paddingHorizontal: Spacing.lg,
     alignItems: 'center',
   },
+  nextBtnFlex: { flex: 1 },
   nextBtnText: { color: Colors.black, fontWeight: FontWeight.bold, fontSize: FontSize.md },
 });
