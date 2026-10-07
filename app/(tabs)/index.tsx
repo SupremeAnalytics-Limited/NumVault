@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, TextInput, ActivityIndicator, Animated,
   RefreshControl, SectionList, AppState, AppStateStatus,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/template';
@@ -18,6 +18,9 @@ import {
 } from '@/services/sociallyService';
 import { PLATFORM_ICONS } from '@/constants/config';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
+import { getSetting } from '@/services/settingsService';
+import { markTourSeen } from '@/services/tourService';
+import DashboardTour, { TourStep } from '@/components/DashboardTour';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -65,6 +68,16 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const { profile } = useWallet();
 
+  const searchBarRef = useRef<View | null>(null);
+  const firstCardRef = useRef<View | null>(null);
+  const yourNumberRowRef = useRef<View | null>(null);
+
+  const [showHomeTour, setShowHomeTour] = useState(false);
+  const [showHomeSheetTour, setShowHomeSheetTour] = useState(false);
+  const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
+  const homeTourShownRef = useRef(false);
+  const homeSheetTourShownRef = useRef(false);
+
   const [provider, setProvider] = useState<ProviderCode>('server-b');
 
   // Server B
@@ -104,6 +117,38 @@ export default function HomeScreen() {
   const [sheetService, setSheetService] = useState<ServiceItem | null>(null);
   const [sheetPackage, setSheetPackage] = useState<{ country: Country; pkg: Package } | null>(null);
   const sheetAnim = useRef(new Animated.Value(0)).current;
+
+  // ── Tours ─────────────────────────────────────────────────────────────────
+
+  useFocusEffect(
+    useCallback(() => {
+      homeTourShownRef.current = false;
+      homeSheetTourShownRef.current = false;
+      return () => {
+        setShowHomeTour(false);
+        setShowHomeSheetTour(false);
+      };
+    }, [])
+  );
+
+  useEffect(() => {
+    getSetting<boolean>('tab_tours_always_show', false).then(setTabToursAlwaysShow);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !loadingServices &&
+      tabToursAlwaysShow !== null &&
+      profile &&
+      !homeTourShownRef.current
+    ) {
+      homeTourShownRef.current = true;
+      const tourSeen = profile.tours_seen?.home;
+      if (tabToursAlwaysShow || !tourSeen) {
+        setShowHomeTour(true);
+      }
+    }
+  }, [loadingServices, tabToursAlwaysShow, profile]);
 
   // ── Provider switch ───────────────────────────────────────────────────────
 
@@ -343,6 +388,16 @@ export default function HomeScreen() {
     setSheetPriceReady(false);
     Animated.spring(sheetAnim, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
 
+    setTimeout(() => {
+      if (!homeSheetTourShownRef.current) {
+        homeSheetTourShownRef.current = true;
+        const tourSeen = profile?.tours_seen?.home_sheet;
+        if (tabToursAlwaysShow || !tourSeen) {
+          setShowHomeSheetTour(true);
+        }
+      }
+    }, 400);
+
     const cached = priceCache.current.get(svc.country_code);
     if (cached !== undefined) {
       if (cached) setSheetService((prev) => prev ? { ...prev, package: cached } : prev);
@@ -505,7 +560,7 @@ export default function HomeScreen() {
               )}
 
               {/* Search */}
-              <View style={styles.searchWrap}>
+              <View ref={searchBarRef} style={styles.searchWrap}>
                 <View style={styles.searchBar}>
                   <MaterialIcons name="search" size={18} color={Colors.textMuted} />
                   <TextInput
@@ -595,9 +650,10 @@ export default function HomeScreen() {
                   renderItem={({ item, index, section }) => {
                     if (index % 2 !== 0) return null;
                     const next = section.data[index + 1];
+                    const isFirstCard = index === 0 && section === serverBSections[0];
                     return (
                       <View style={styles.row}>
-                        <ServiceCard service={item} onPress={() => openSheetService(item)} />
+                        <ServiceCard ref={isFirstCard ? firstCardRef : undefined} service={item} onPress={() => openSheetService(item)} />
                         {next
                           ? <ServiceCard service={next} onPress={() => openSheetService(next)} />
                           : <View style={styles.cardWrap} />
@@ -640,6 +696,31 @@ export default function HomeScreen() {
         </View>
       )}
 
+      {/* ═══ HOME TOURS ═══ */}
+      {showHomeTour && (
+        <DashboardTour
+          steps={[
+            { ref: searchBarRef, title: 'Search for any service', body: 'Type a platform name — TikTok, WhatsApp, PayPal — to find it instantly.' },
+            { ref: firstCardRef, title: 'Tap a card to see the price and buy a number', body: 'Each card shows the price. Tap it, then confirm your purchase.' },
+          ] as TourStep[]}
+          visible={showHomeTour}
+          skippable
+          onFinish={async () => { setShowHomeTour(false); await markTourSeen('home'); }}
+          onSkip={async () => { setShowHomeTour(false); await markTourSeen('home'); }}
+        />
+      )}
+      {showHomeSheetTour && (
+        <DashboardTour
+          steps={[
+            { ref: yourNumberRowRef, title: 'Your number', body: 'After buying, your number appears here. Copy it to verify your account.' },
+          ] as TourStep[]}
+          visible={showHomeSheetTour}
+          skippable
+          onFinish={async () => { setShowHomeSheetTour(false); await markTourSeen('home_sheet'); }}
+          onSkip={async () => { setShowHomeSheetTour(false); await markTourSeen('home_sheet'); }}
+        />
+      )}
+
       {/* ═══ BOTTOM SHEET ═══ */}
       {isSheetOpen && (
         <>
@@ -678,10 +759,10 @@ export default function HomeScreen() {
             <View style={styles.sheetDetails}>
               {[
                 { label: 'Your number', value: '🔒 +1 (***) ***-****' },
-                { label: 'OTP delivery', value: 'Auto-captured within 10 min' },
+                { label: 'OTP delivery', value: 'Auto-captured within 5 min' },
                 { label: 'Refund policy', value: 'Auto-refund if no OTP in 5 mins', green: true },
               ].map((row) => (
-                <View key={row.label} style={styles.sheetRow}>
+                <View key={row.label} ref={row.label === 'Your number' ? yourNumberRowRef : undefined} style={styles.sheetRow}>
                   <Text style={styles.sheetRowLabel}>{row.label}</Text>
                   <Text style={[styles.sheetRowValue, row.green && { color: Colors.primary }]}>{row.value}</Text>
                 </View>
@@ -735,7 +816,8 @@ function getFlagEmoji(code: string): string {
 
 // ── Service Card (Server B) ───────────────────────────────────────────────────
 
-function ServiceCard({ service, onPress }: { service: ServiceItem; onPress: () => void }) {
+const ServiceCard = React.forwardRef<View, { service: ServiceItem; onPress: () => void }>(
+  function ServiceCard({ service, onPress }, ref) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const onPressIn = () => Animated.spring(scaleAnim, { toValue: 0.95, useNativeDriver: true, speed: 30 }).start();
   const onPressOut = () => Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30 }).start();
@@ -746,7 +828,7 @@ function ServiceCard({ service, onPress }: { service: ServiceItem; onPress: () =
   const isPopular = getServicePopularityRank(service.title) < 18;
 
   return (
-    <Animated.View style={[styles.cardWrap, { transform: [{ scale: scaleAnim }] }]}>
+    <Animated.View ref={ref} style={[styles.cardWrap, { transform: [{ scale: scaleAnim }] }]}>
       <TouchableOpacity
         style={styles.card}
         onPress={onPress}
@@ -777,7 +859,7 @@ function ServiceCard({ service, onPress }: { service: ServiceItem; onPress: () =
       </TouchableOpacity>
     </Animated.View>
   );
-}
+});
 
 // ── Package Card (Server A) ───────────────────────────────────────────────────
 
