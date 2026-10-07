@@ -18,7 +18,6 @@ import {
 } from '@/services/sociallyService';
 import { PLATFORM_ICONS } from '@/constants/config';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSetting } from '@/services/settingsService';
 import { markTourSeen } from '@/services/tourService';
 import DashboardTour, { TourStep } from '@/components/DashboardTour';
@@ -76,6 +75,7 @@ export default function HomeScreen() {
   const [showHomeTour, setShowHomeTour] = useState(false);
   const [showHomeSheetTour, setShowHomeSheetTour] = useState(false);
   const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
+  const [focusTrigger, setFocusTrigger] = useState(0);
   const homeTourShownRef = useRef(false);
   const homeSheetTourShownRef = useRef(false);
 
@@ -125,6 +125,7 @@ export default function HomeScreen() {
     useCallback(() => {
       homeTourShownRef.current = false;
       homeSheetTourShownRef.current = false;
+      setFocusTrigger((n) => n + 1);
       return () => {
         setShowHomeTour(false);
         setShowHomeSheetTour(false);
@@ -145,19 +146,11 @@ export default function HomeScreen() {
     ) {
       homeTourShownRef.current = true;
       const tourSeen = profile.tours_seen?.home;
-      if (tabToursAlwaysShow) {
+      if (tabToursAlwaysShow || !tourSeen) {
         setShowHomeTour(true);
-      } else if (!tourSeen) {
-        AsyncStorage.getItem('numvault_home_visited_once').then((visited) => {
-          if (!visited) {
-            AsyncStorage.setItem('numvault_home_visited_once', '1');
-          } else {
-            setShowHomeTour(true);
-          }
-        });
       }
     }
-  }, [loadingServices, tabToursAlwaysShow, profile]);
+  }, [loadingServices, tabToursAlwaysShow, profile, focusTrigger]);
 
   // ── Provider switch ───────────────────────────────────────────────────────
 
