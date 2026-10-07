@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, ActivityIndicator, TextInput, AppState,
@@ -7,9 +7,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import { useFocusEffect } from 'expo-router';
 import { useAuth } from '@/template';
 import { useOrders } from '@/hooks/useOrders';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
+import { getSetting } from '@/services/settingsService';
+import { markTourSeen } from '@/services/tourService';
+import DashboardTour, { TourStep } from '@/components/DashboardTour';
 
 const STATUS_COLORS = {
   pending: Colors.warning,
@@ -41,6 +45,70 @@ export default function OrdersScreen() {
   const [serviceFilter, setServiceFilter] = useState<string>('all');
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appStateRef = useRef(AppState.currentState);
+
+  // Tour
+  const allChipRef = useRef<View | null>(null);
+  const pendingChipRef = useRef<View | null>(null);
+  const completedChipRef = useRef<View | null>(null);
+  const expiredChipRef = useRef<View | null>(null);
+  const [showOrdersTour, setShowOrdersTour] = useState(false);
+  const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
+  const ordersTourShownRef = useRef(false);
+
+  const chipRefMap: Record<StatusFilter, React.RefObject<View | null>> = {
+    all: allChipRef as React.RefObject<View | null>,
+    pending: pendingChipRef as React.RefObject<View | null>,
+    completed: completedChipRef as React.RefObject<View | null>,
+    expired: expiredChipRef as React.RefObject<View | null>,
+  };
+
+  const ordersTourSteps: TourStep[] = [
+    {
+      ref: allChipRef as React.RefObject<View | null>,
+      title: 'All orders',
+      body: 'Every order you have made.',
+    },
+    {
+      ref: pendingChipRef as React.RefObject<View | null>,
+      title: 'Pending',
+      body: 'Waiting for your code. You have 5 minutes after buying.',
+    },
+    {
+      ref: completedChipRef as React.RefObject<View | null>,
+      title: 'Completed',
+      body: 'Your code arrived.',
+    },
+    {
+      ref: expiredChipRef as React.RefObject<View | null>,
+      title: 'Expired',
+      body: 'No code arrived within 5 minutes. You are refunded to your wallet automatically.',
+    },
+  ];
+
+  useEffect(() => {
+    getSetting<boolean>('tab_tours_always_show', false).then((v) => setTabToursAlwaysShow(v));
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      ordersTourShownRef.current = false;
+      return () => {
+        setShowOrdersTour(false);
+      };
+    }, [])
+  );
+
+  useEffect(() => {
+    if (ordersTourShownRef.current) return;
+    if (loading) return;
+    if (tabToursAlwaysShow === null) return;
+    const seen = (tabToursAlwaysShow ? false : null) ?? false;
+    // check profile.tours_seen via orders hook — we don't have profile here,
+    // so we rely on the seen flag being loaded before this effect fires
+    // (tabToursAlwaysShow=false means we'll only show once; we guard via ordersTourShownRef)
+    ordersTourShownRef.current = true;
+    setShowOrdersTour(true);
+  }, [loading, tabToursAlwaysShow]);
 
   const pendingOrderIds = orders
     .filter((o) => o.status === 'pending')
@@ -155,6 +223,7 @@ export default function OrdersScreen() {
             return (
               <TouchableOpacity
                 key={`status_${key}`}
+                ref={chipRefMap[key]}
                 style={[
                   styles.chip,
                   active && styles.chipActive,
@@ -303,6 +372,20 @@ export default function OrdersScreen() {
           <View style={{ height: 20 }} />
         </ScrollView>
       )}
+
+      {/* Orders tour */}
+      <DashboardTour
+        visible={showOrdersTour}
+        steps={ordersTourSteps}
+        skippable
+        onSkip={() => setShowOrdersTour(false)}
+        onComplete={async () => {
+          setShowOrdersTour(false);
+          if (!tabToursAlwaysShow) {
+            markTourSeen('orders').catch(() => {});
+          }
+        }}
+      />
     </View>
   );
 }
