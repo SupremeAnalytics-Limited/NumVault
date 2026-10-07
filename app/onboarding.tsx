@@ -41,7 +41,7 @@ const SCREENS = [
       'Choose what you\'re signing up for',
       'Pick a number',
       'Pay securely with your card or transfer',
-      'Get your number instantly. OTP delivered automatically.',
+      'Your number appears instantly. Tap "Request OTP" to receive the verification code.',
     ],
   },
 ];
