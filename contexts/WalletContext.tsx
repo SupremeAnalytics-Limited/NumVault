@@ -16,6 +16,7 @@ interface UserProfile {
   card_brand: string | null;
   card_exp_month: string | null;
   card_exp_year: string | null;
+  tours_seen?: Record<string, boolean>;
 }
 
 interface WalletContextType {
