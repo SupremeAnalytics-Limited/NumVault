@@ -10,6 +10,7 @@ import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from 'expo-router';
 import { useAuth } from '@/template';
 import { useOrders } from '@/hooks/useOrders';
+import { useWallet } from '@/hooks/useWallet';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 import { getSetting } from '@/services/settingsService';
 import { markTourSeen } from '@/services/tourService';
@@ -41,6 +42,7 @@ export default function OrdersScreen() {
   const router = useRouter();
   const { orders, loading, refreshOrders, refreshOrderStatus } = useOrders();
   const { user } = useAuth();
+  const { profile } = useWallet();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [serviceFilter, setServiceFilter] = useState<string>('all');
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -100,15 +102,13 @@ export default function OrdersScreen() {
 
   useEffect(() => {
     if (ordersTourShownRef.current) return;
-    if (loading) return;
     if (tabToursAlwaysShow === null) return;
-    const seen = (tabToursAlwaysShow ? false : null) ?? false;
-    // check profile.tours_seen via orders hook — we don't have profile here,
-    // so we rely on the seen flag being loaded before this effect fires
-    // (tabToursAlwaysShow=false means we'll only show once; we guard via ordersTourShownRef)
-    ordersTourShownRef.current = true;
-    setShowOrdersTour(true);
-  }, [loading, tabToursAlwaysShow]);
+    const tourSeen = profile?.tours_seen?.orders;
+    if (tabToursAlwaysShow || !tourSeen) {
+      ordersTourShownRef.current = true;
+      setShowOrdersTour(true);
+    }
+  }, [tabToursAlwaysShow, profile]);
 
   const pendingOrderIds = orders
     .filter((o) => o.status === 'pending')
