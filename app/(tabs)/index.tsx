@@ -139,7 +139,6 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (
-      !loadingServices &&
       tabToursAlwaysShow !== null &&
       profile &&
       !homeTourShownRef.current
@@ -150,7 +149,7 @@ export default function HomeScreen() {
         setShowHomeTour(true);
       }
     }
-  }, [loadingServices, tabToursAlwaysShow, profile, focusTrigger]);
+  }, [tabToursAlwaysShow, profile, focusTrigger]);
 
   // ── Provider switch ───────────────────────────────────────────────────────
 
