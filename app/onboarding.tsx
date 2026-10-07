@@ -31,17 +31,30 @@ const SCREENS = [
       },
       {
         intro: 'Use a virtual number for:',
-        items: ['Business separation', 'Project separation', 'Developer testing', 'Online services', 'More'],
+        items: ['Business separation', 'Project separation', 'Developer testing', 'More'],
       },
-    ] as null | { intro: string; items: string[] }[],
+    ] as null | { intro: null | string; items: string[] }[],
   },
   {
     image: require('@/assets/images/nv_s2.png'),
     tag: null as null | string,
     headline: 'No subscription, No rent. Pay as you go.',
-    body: 'Choose from 2,300+ apps & services and pay only when you need a number without being locked into a monthly subscription. Your purchased number belongs to you for that service.' as null | string,
+    body: null as null | string,
     steps: null,
-    bulletSections: null,
+    bulletSections: [
+      {
+        intro: null as null | string,
+        items: [
+          'No subscription',
+          'No rent',
+          'Pay as you go',
+          '2,300+ apps & services',
+          'Pay only when you need a number',
+          'No monthly commitment',
+          'Your purchased number belongs to you for that service',
+        ],
+      },
+    ] as null | { intro: null | string; items: string[] }[],
   },
   {
     image: require('@/assets/images/nv_s3.png'),
@@ -53,7 +66,11 @@ const SCREENS = [
       'Choose what you\'re signing up for',
       'Pick a number',
       'Pay securely with your card or transfer',
-      'Once the platform confirms they\'ve sent an OTP to your number, return here and tap "Request OTP" to retrieve it.',
+      'Choose a service',
+      'Pick a number',
+      'Pay securely',
+      'Request your OTP',
+      'Get your code',
     ],
   },
 ];
@@ -152,7 +169,7 @@ export default function OnboardingScreen() {
           <View style={styles.bulletSectionsWrap}>
             {screen.bulletSections.map((section, si) => (
               <View key={si} style={si > 0 ? styles.bulletSectionGap : undefined}>
-                <Text style={styles.bulletIntro}>{section.intro}</Text>
+                {section.intro ? <Text style={styles.bulletIntro}>{section.intro}</Text> : null}
                 {section.items.map((item, ii) => (
                   <View key={ii} style={styles.bulletRow}>
                     <Text style={styles.bulletDot}>•</Text>
@@ -245,9 +262,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: height * 0.22,
+    height: height * 0.08,
     backgroundColor: Colors.background,
-    opacity: 0.96,
+    opacity: 0.6,
   },
   bottomCard: {
     backgroundColor: Colors.background,
