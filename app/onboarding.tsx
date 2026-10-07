@@ -38,7 +38,7 @@ const SCREENS = [
   {
     image: require('@/assets/images/nv_s2.png'),
     tag: null as null | string,
-    headline: 'No subscription, No rent. Pay as you go.',
+    headline: '2,300+ apps & services',
     body: null as null | string,
     steps: null,
     bulletSections: [
@@ -48,7 +48,6 @@ const SCREENS = [
           'No subscription',
           'No rent',
           'Pay as you go',
-          '2,300+ apps & services',
           'Pay only when you need a number',
           'No monthly commitment',
           'Your purchased number belongs to you for that service',
@@ -60,12 +59,9 @@ const SCREENS = [
     image: require('@/assets/images/nv_s3.png'),
     tag: null,
     headline: "Here's exactly how it works",
-    body: 'Have numbers for different purposes — personal, business, projects, accounts, and more. With 2,300+ apps & services available, you have the capacity to create separation wherever you need it.',
+    body: null,
     bulletSections: null,
     steps: [
-      'Choose what you\'re signing up for',
-      'Pick a number',
-      'Pay securely with your card or transfer',
       'Choose a service',
       'Pick a number',
       'Pay securely',
