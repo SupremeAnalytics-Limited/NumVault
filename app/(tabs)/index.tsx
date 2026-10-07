@@ -18,6 +18,7 @@ import {
 } from '@/services/sociallyService';
 import { PLATFORM_ICONS } from '@/constants/config';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSetting } from '@/services/settingsService';
 import { markTourSeen } from '@/services/tourService';
 import DashboardTour, { TourStep } from '@/components/DashboardTour';
@@ -144,8 +145,16 @@ export default function HomeScreen() {
     ) {
       homeTourShownRef.current = true;
       const tourSeen = profile.tours_seen?.home;
-      if (tabToursAlwaysShow || !tourSeen) {
+      if (tabToursAlwaysShow) {
         setShowHomeTour(true);
+      } else if (!tourSeen) {
+        AsyncStorage.getItem('numvault_home_visited_once').then((visited) => {
+          if (!visited) {
+            AsyncStorage.setItem('numvault_home_visited_once', '1');
+          } else {
+            setShowHomeTour(true);
+          }
+        });
       }
     }
   }, [loadingServices, tabToursAlwaysShow, profile]);
@@ -705,7 +714,7 @@ export default function HomeScreen() {
           ] as TourStep[]}
           visible={showHomeTour}
           skippable
-          onFinish={async () => { setShowHomeTour(false); await markTourSeen('home'); }}
+          onComplete={async () => { setShowHomeTour(false); await markTourSeen('home'); }}
           onSkip={async () => { setShowHomeTour(false); await markTourSeen('home'); }}
         />
       )}
@@ -716,7 +725,7 @@ export default function HomeScreen() {
           ] as TourStep[]}
           visible={showHomeSheetTour}
           skippable
-          onFinish={async () => { setShowHomeSheetTour(false); await markTourSeen('home_sheet'); }}
+          onComplete={async () => { setShowHomeSheetTour(false); await markTourSeen('home_sheet'); }}
           onSkip={async () => { setShowHomeSheetTour(false); await markTourSeen('home_sheet'); }}
         />
       )}
