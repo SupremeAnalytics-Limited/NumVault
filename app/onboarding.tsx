@@ -22,6 +22,7 @@ const SCREENS = [
   {
     image: require('@/assets/images/nv_s1.png'),
     coverBottom: true,
+    coverTop: false,
     tag: null as null | string,
     headline: 'Use a virtual number instead.',
     body: null as null | string,
@@ -40,6 +41,7 @@ const SCREENS = [
   {
     image: require('@/assets/images/nv_s2.png'),
     coverBottom: false,
+    coverTop: false,
     tag: null as null | string,
     headline: '2,300+ apps & services',
     body: null as null | string,
@@ -61,6 +63,7 @@ const SCREENS = [
   {
     image: require('@/assets/images/nv_s3.png'),
     coverBottom: true,
+    coverTop: true,
     tag: null,
     headline: "Here's exactly how it works",
     body: null,
@@ -68,7 +71,7 @@ const SCREENS = [
     steps: [
       'Choose a service',
       'Pick a number',
-      'Pay securely',
+      'Pay & transfer securely',
       'Request your OTP',
       'Get your code',
     ],
@@ -149,6 +152,12 @@ export default function OnboardingScreen() {
               contentFit="cover"
               transition={300}
             />
+            {s.coverTop && (
+              <LinearGradient
+                colors={[Colors.background, 'transparent']}
+                style={styles.imageTopCover}
+              />
+            )}
             <View style={styles.gradient} />
             {s.coverBottom && (
               <LinearGradient
@@ -271,6 +280,14 @@ const styles = StyleSheet.create({
     height: height * 0.08,
     backgroundColor: Colors.background,
     opacity: 1,
+  },
+  imageTopCover: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: height * 0.28,
+    zIndex: 2,
   },
   imageBottomCover: {
     position: 'absolute',
