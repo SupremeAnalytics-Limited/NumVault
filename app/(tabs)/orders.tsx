@@ -55,6 +55,7 @@ export default function OrdersScreen() {
   const expiredChipRef = useRef<View | null>(null);
   const [showOrdersTour, setShowOrdersTour] = useState(false);
   const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
+  const [focusTrigger, setFocusTrigger] = useState(0);
   const ordersTourShownRef = useRef(false);
 
   const chipRefMap: Record<StatusFilter, React.RefObject<View | null>> = {
@@ -90,6 +91,7 @@ export default function OrdersScreen() {
   useFocusEffect(
     useCallback(() => {
       ordersTourShownRef.current = false;
+      setFocusTrigger((n) => n + 1);
       getSetting<boolean>('tab_tours_always_show', false).then((v) => setTabToursAlwaysShow(v));
       return () => {
         setShowOrdersTour(false);
@@ -105,7 +107,7 @@ export default function OrdersScreen() {
       ordersTourShownRef.current = true;
       setShowOrdersTour(true);
     }
-  }, [tabToursAlwaysShow, profile]);
+  }, [tabToursAlwaysShow, profile, focusTrigger]);
 
   const pendingOrderIds = orders
     .filter((o) => o.status === 'pending')
