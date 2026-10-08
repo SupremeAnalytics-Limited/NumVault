@@ -24,6 +24,7 @@ const SCREENS = [
     coverBottom: true,
     coverTop: false,
     coverFull: false,
+    hideImage: false,
     tag: null as null | string,
     headline: 'Use a virtual number instead.',
     body: null as null | string,
@@ -44,6 +45,7 @@ const SCREENS = [
     coverBottom: false,
     coverTop: false,
     coverFull: false,
+    hideImage: false,
     tag: null as null | string,
     headline: '2,300+ apps & services',
     body: null as null | string,
@@ -64,9 +66,10 @@ const SCREENS = [
   },
   {
     image: require('@/assets/images/nv_s3.png'),
-    coverBottom: true,
-    coverTop: true,
-    coverFull: true,
+    coverBottom: false,
+    coverTop: false,
+    coverFull: false,
+    hideImage: true,
     tag: null,
     headline: "Here's exactly how it works",
     body: null,
@@ -149,12 +152,14 @@ export default function OnboardingScreen() {
       >
         {SCREENS.map((s, i) => (
           <View key={i} style={[styles.page, { width }]}>
-            <Image
-              source={s.image}
-              style={styles.illustration}
-              contentFit="cover"
-              transition={300}
-            />
+            {!s.hideImage && (
+              <Image
+                source={s.image}
+                style={styles.illustration}
+                contentFit="cover"
+                transition={300}
+              />
+            )}
             {s.coverFull && (
               <View style={styles.imageFullCover} />
             )}
