@@ -44,6 +44,7 @@ export default function NumberDisplayScreen() {
   const [refundError, setRefundError] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [showCelebrationTour, setShowCelebrationTour] = useState(false);
+  const [tourHasOtpButton, setTourHasOtpButton] = useState(true);
   const scrollViewRef = useRef<ScrollView>(null);
   const phoneRowRef = useRef<View>(null);
   const requestOtpBtnRef = useRef<View>(null);
@@ -54,7 +55,18 @@ export default function NumberDisplayScreen() {
   const walletCtx = useContext(WalletContext);
   const orderCtx  = useContext(OrderContext);
 
+  // Start the tour only once the order has loaded, so the elements it points
+  // at are actually on screen. Remember whether the Request OTP button exists
+  // for this order: it is hidden once the order is completed or expired.
+  const tourCheckedRef = useRef(false);
   useEffect(() => {
+    if (initialLoading || !order || tourCheckedRef.current) return;
+    tourCheckedRef.current = true;
+    const buttonShown =
+      order.status === 'pending' &&
+      !order.otp &&
+      new Date(order.created_at).getTime() + OTP_TIMEOUT > Date.now();
+    setTourHasOtpButton(buttonShown);
     getSetting<boolean>('tab_tours_always_show', false).then((alwaysShow) => {
       AsyncStorage.getItem('numvault_number_display_tour_seen').then((seen) => {
         if (alwaysShow || !seen) {
@@ -62,7 +74,7 @@ export default function NumberDisplayScreen() {
         }
       });
     });
-  }, []);
+  }, [initialLoading, order]);
 
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -596,11 +608,11 @@ export default function NumberDisplayScreen() {
               title: 'This is your virtual number',
               body: 'Tap the number to copy it. Head to the platform you\'re signing up for and enter it where they ask for a phone number.',
             },
-            {
+            ...(tourHasOtpButton ? [{
               ref: requestOtpBtnRef,
               title: 'Request your OTP here',
               body: 'Once you\'ve entered the number on the platform and the service confirms that a verification SMS has been sent to your new number, tap "Request OTP/SMS." This triggers the verification code to be received by your new virtual number.',
-            },
+            }] : []),
             {
               ref: smsInboxRowRef,
               title: 'Your OTP appears in the inbox',
