@@ -21,10 +21,10 @@ const { width, height } = Dimensions.get('window');
 const SCREENS = [
   {
     image: require('@/assets/images/nv_s1.png'),
+    imageOpacity: 1,
     coverBottom: true,
     coverTop: false,
     coverFull: false,
-    hideImage: false,
     tag: null as null | string,
     headline: 'Use a virtual number instead.',
     body: null as null | string,
@@ -42,10 +42,10 @@ const SCREENS = [
   },
   {
     image: require('@/assets/images/nv_s2.png'),
+    imageOpacity: 1,
     coverBottom: false,
     coverTop: false,
     coverFull: false,
-    hideImage: false,
     tag: null as null | string,
     headline: '2,300+ apps & services',
     body: null as null | string,
@@ -66,10 +66,10 @@ const SCREENS = [
   },
   {
     image: require('@/assets/images/nv_s3.png'),
-    coverBottom: false,
+    imageOpacity: 0.12,
+    coverBottom: true,
     coverTop: false,
     coverFull: false,
-    hideImage: true,
     tag: null,
     headline: "Here's exactly how it works",
     body: null,
@@ -152,14 +152,12 @@ export default function OnboardingScreen() {
       >
         {SCREENS.map((s, i) => (
           <View key={i} style={[styles.page, { width }]}>
-            {!s.hideImage && (
-              <Image
-                source={s.image}
-                style={styles.illustration}
-                contentFit="cover"
-                transition={300}
-              />
-            )}
+            <Image
+              source={s.image}
+              style={[styles.illustration, { opacity: s.imageOpacity }]}
+              contentFit="cover"
+              transition={300}
+            />
             {s.coverFull && (
               <View style={styles.imageFullCover} />
             )}
