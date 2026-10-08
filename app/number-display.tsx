@@ -611,7 +611,7 @@ export default function NumberDisplayScreen() {
             ...(tourHasOtpButton ? [{
               ref: requestOtpBtnRef,
               title: 'Request your OTP here',
-              body: 'Once you\'ve entered the number on the platform and the service confirms that a verification SMS has been sent to your new number, tap "Request OTP/SMS." This triggers the verification code to be received by your new virtual number.',
+              body: 'Once you\'ve entered the number on the platform and the service confirms that a verification SMS has been sent to your new number, tap "Request OTP." This triggers the verification code to be received by your new virtual number.',
             }] : []),
             {
               ref: smsInboxRowRef,
