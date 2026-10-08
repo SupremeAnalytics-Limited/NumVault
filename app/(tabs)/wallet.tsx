@@ -40,6 +40,7 @@ export default function WalletScreen() {
   const refreshBtnRef = useRef<View | null>(null);
   const [showWalletTour, setShowWalletTour] = useState(false);
   const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
+  const [focusTrigger, setFocusTrigger] = useState(0);
   const walletTourShownRef = useRef(false);
 
   const walletTourSteps: TourStep[] = [
@@ -61,6 +62,7 @@ export default function WalletScreen() {
   useFocusEffect(
     useCallback(() => {
       walletTourShownRef.current = false;
+      setFocusTrigger((n) => n + 1);
       getSetting<boolean>('tab_tours_always_show', false).then((v) => setTabToursAlwaysShow(v));
       return () => {
         setShowWalletTour(false);
@@ -76,7 +78,7 @@ export default function WalletScreen() {
     if (seen && !tabToursAlwaysShow) return;
     walletTourShownRef.current = true;
     setShowWalletTour(true);
-  }, [tabToursAlwaysShow, profile]);
+  }, [tabToursAlwaysShow, profile, focusTrigger]);
 
   useEffect(() => {
     if (user) {
