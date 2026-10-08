@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, Modal, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, AppState,
@@ -7,6 +7,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import * as Haptics from 'expo-haptics';
+import { useFocusEffect } from 'expo-router';
 import { useAuth, useAlert } from '@/template';
 import { useWallet } from '@/hooks/useWallet';
 import { useOrders } from '@/hooks/useOrders';
@@ -16,6 +17,9 @@ import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme
 import {
   trackWalletTopupInitiated, trackWalletTopupCompleted, trackWalletTopupFailed, captureError,
 } from '@/services/sentryService';
+import { getSetting } from '@/services/settingsService';
+import { markTourSeen } from '@/services/tourService';
+import DashboardTour, { TourStep } from '@/components/DashboardTour';
 
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
@@ -31,8 +35,50 @@ export default function WalletScreen() {
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appStateRef = useRef(AppState.currentState);
 
+  // Tour
+  const balanceCardRef = useRef<View | null>(null);
+  const refreshBtnRef = useRef<View | null>(null);
+  const [showWalletTour, setShowWalletTour] = useState(false);
+  const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
+  const [focusTrigger, setFocusTrigger] = useState(0);
+  const walletTourShownRef = useRef(false);
+
+  const walletTourSteps: TourStep[] = [
+    {
+      ref: balanceCardRef as React.RefObject<View | null>,
+      title: 'Your wallet',
+      body: 'Your available balance lives here. Add money once and pay for numbers instantly — no card details every time.',
+    },
+    {
+      ref: refreshBtnRef as React.RefObject<View | null>,
+      title: 'Manual refresh',
+      body: 'Tap to pull your latest balance and transaction history from the server.',
+    },
+  ];
+
   const LOW_BALANCE_THRESHOLD = 500;
   const lowBalanceNotifiedRef = React.useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      walletTourShownRef.current = false;
+      setFocusTrigger((n) => n + 1);
+      getSetting<boolean>('tab_tours_always_show', false).then((v) => setTabToursAlwaysShow(v));
+      return () => {
+        setShowWalletTour(false);
+      };
+    }, [])
+  );
+
+  useEffect(() => {
+    if (walletTourShownRef.current) return;
+    if (tabToursAlwaysShow === null) return;
+    if (!profile) return;
+    const seen = profile.tours_seen?.['wallet'] === true;
+    if (seen && !tabToursAlwaysShow) return;
+    walletTourShownRef.current = true;
+    setShowWalletTour(true);
+  }, [tabToursAlwaysShow, profile, focusTrigger]);
 
   useEffect(() => {
     if (user) {
@@ -155,6 +201,7 @@ export default function WalletScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Wallet</Text>
         <TouchableOpacity
+          ref={refreshBtnRef}
           onPress={async () => {
             await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             refreshProfile();
@@ -168,7 +215,7 @@ export default function WalletScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
         {/* Balance Card */}
-        <View style={styles.balanceCard}>
+        <View ref={balanceCardRef} style={styles.balanceCard}>
           <View style={styles.balanceGlow} />
           <Text style={styles.balanceLabel}>Available Balance</Text>
           <Text style={styles.balanceAmount}>₦{Number(walletBalance).toLocaleString()}</Text>
@@ -318,6 +365,20 @@ export default function WalletScreen() {
           )}
         </View>
       </Modal>
+
+      {/* Wallet tour */}
+      <DashboardTour
+        visible={showWalletTour}
+        steps={walletTourSteps}
+        skippable
+        onSkip={() => setShowWalletTour(false)}
+        onComplete={async () => {
+          setShowWalletTour(false);
+          if (!tabToursAlwaysShow) {
+            markTourSeen('wallet').catch(() => {});
+          }
+        }}
+      />
     </View>
   );
 }

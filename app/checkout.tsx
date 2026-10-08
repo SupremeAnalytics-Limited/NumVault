@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, ActivityIndicator, Modal,
@@ -19,13 +19,16 @@ import {
   trackCheckoutCompleted, captureError,
 } from '@/services/sentryService';
 import { PLATFORM_ICONS } from '@/constants/config';
+import { getSetting } from '@/services/settingsService';
+import { markTourSeen } from '@/services/tourService';
+import DashboardTour, { TourStep } from '@/components/DashboardTour';
 
 export default function CheckoutScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
   const { refreshOrders } = useOrders();
-  const { walletBalance, refreshProfile } = useWallet();
+  const { walletBalance, refreshProfile, profile } = useWallet();
   const { showAlert } = useAlert();
 
   const params = useLocalSearchParams<{
@@ -47,6 +50,51 @@ export default function CheckoutScreen() {
   // Guard: prevent handleWebViewNav from firing executePurchase more than once per payment attempt
   const callbackFiredRef = React.useRef(false);
 
+  // Tour
+  const orderCardRef = useRef<View | null>(null);
+  const priceWalletRef = useRef<View | null>(null);
+  const payBtnRef = useRef<View | null>(null);
+  const [showCheckoutTour, setShowCheckoutTour] = useState(false);
+  const [checkoutIntroAlwaysShow, setCheckoutIntroAlwaysShow] = useState<boolean | null>(null);
+  const checkoutTourShownRef = useRef(false);
+
+  const checkoutTourSteps: TourStep[] = [
+    {
+      ref: orderCardRef as React.RefObject<View | null>,
+      title: 'Your order',
+      body: 'The service and price you are buying. Review before you pay.',
+    },
+    {
+      ref: priceWalletRef as React.RefObject<View | null>,
+      title: 'Payment',
+      body: 'Pay from your wallet balance or via card/bank transfer through Paystack.',
+    },
+    {
+      ref: payBtnRef as React.RefObject<View | null>,
+      title: 'Pay button',
+      body: 'Tap here when you are ready. If paying from wallet it is instant.',
+    },
+    {
+      title: 'What happens next',
+      body: 'After payment we secure your number. If no OTP arrives within 5 minutes, your money is automatically refunded to your wallet.',
+    },
+  ];
+
+  useEffect(() => {
+    getSetting<boolean>('checkout_intro_always_show', false).then((v) => setCheckoutIntroAlwaysShow(v));
+  }, []);
+
+  // Show tour after balance is ready and settings loaded
+  useEffect(() => {
+    if (checkoutTourShownRef.current) return;
+    if (!balanceReady) return;
+    if (checkoutIntroAlwaysShow === null) return;
+    const seen = profile?.tours_seen?.['checkout'] === true;
+    if (seen && !checkoutIntroAlwaysShow) return;
+    checkoutTourShownRef.current = true;
+    setShowCheckoutTour(true);
+  }, [balanceReady, checkoutIntroAlwaysShow, profile]);
+
   // Refresh wallet balance on mount so the checkout always shows the live balance.
   useEffect(() => {
     refreshProfile().finally(() => setBalanceReady(true));
@@ -66,7 +114,7 @@ export default function CheckoutScreen() {
     const lower = msg.toLowerCase();
     // NV-901: generic provider failure — already formatted by server, pass through cleanly
     if (lower.includes('nv-901'))
-      return { message: 'Transaction could not be completed. Your payment has been refunded \u2014 please try again in a moment.', hint: 'Reference: NV-901' };
+      return { message: 'Transaction could not be completed. Your payment has been refunded — please try again in a moment.', hint: 'Reference: NV-901' };
     if (lower.includes('price') && lower.includes('changed'))
       return { message: msg, hint: 'Prices update in real time. Go back to see the current price.' };
     if (lower.includes('insufficient') || lower.includes('balance') || lower.includes('fund'))
@@ -132,8 +180,8 @@ export default function CheckoutScreen() {
       if (e.refunded) {
         const amt = e.refund_amount ?? price;
         parsed.hint = fromWallet
-          ? `\u20a6${Number(amt).toLocaleString()} has been returned to your wallet balance.`
-          : `Your payment of \u20a6${Number(amt).toLocaleString()} has been refunded to your wallet.`;
+          ? `₦${Number(amt).toLocaleString()} has been returned to your wallet balance.`
+          : `Your payment of ₦${Number(amt).toLocaleString()} has been refunded to your wallet.`;
       }
       setPurchaseError(parsed);
     } finally {
@@ -212,8 +260,8 @@ export default function CheckoutScreen() {
   const canPayFromWallet = balanceReady && walletBalance >= price;
 
   const payBtnLabel = canPayFromWallet
-    ? `Pay \u20a6${price.toLocaleString()} from Wallet`
-    : `Pay \u20a6${price.toLocaleString()}`;
+    ? `Pay ₦${price.toLocaleString()} from Wallet`
+    : `Pay ₦${price.toLocaleString()}`;
 
   const stageLabel = purchaseStage === 'paying'
     ? 'Opening payment...'
@@ -255,7 +303,7 @@ export default function CheckoutScreen() {
         )}
 
         {/* ── Order card ── */}
-        <View style={styles.orderCard}>
+        <View ref={orderCardRef} style={styles.orderCard}>
           {/* Platform row */}
           <View style={styles.platformRow}>
             <View style={styles.platformIcon}>
@@ -287,7 +335,7 @@ export default function CheckoutScreen() {
           )}
 
           {/* Price breakdown */}
-          <View style={styles.priceSection}>
+          <View ref={priceWalletRef} style={styles.priceSection}>
             <View style={styles.priceRow}>
               <Text style={styles.priceRowLabel}>Service fee</Text>
               <Text style={styles.priceRowValue}>₦{price.toLocaleString()}</Text>
@@ -383,6 +431,7 @@ export default function CheckoutScreen() {
       {/* ── Sticky Pay CTA ── */}
       <View style={[styles.ctaBar, { paddingBottom: insets.bottom + 16 }]}>
         <TouchableOpacity
+          ref={payBtnRef}
           style={[styles.payBtn, loading && styles.payBtnDisabled]}
           onPress={handlePay}
           disabled={loading}
@@ -422,6 +471,20 @@ export default function CheckoutScreen() {
           )}
         </View>
       </Modal>
+
+      {/* Checkout intro tour */}
+      <DashboardTour
+        visible={showCheckoutTour}
+        steps={checkoutTourSteps}
+        skippable
+        onSkip={() => setShowCheckoutTour(false)}
+        onComplete={async () => {
+          setShowCheckoutTour(false);
+          if (!checkoutIntroAlwaysShow) {
+            markTourSeen('checkout').catch(() => {});
+          }
+        }}
+      />
     </View>
   );
 }

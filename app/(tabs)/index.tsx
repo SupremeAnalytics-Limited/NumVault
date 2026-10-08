@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   StatusBar, TextInput, ActivityIndicator, Animated,
   RefreshControl, SectionList, AppState, AppStateStatus,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/template';
@@ -18,6 +18,9 @@ import {
 } from '@/services/sociallyService';
 import { PLATFORM_ICONS } from '@/constants/config';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
+import { getSetting } from '@/services/settingsService';
+import { markTourSeen } from '@/services/tourService';
+import DashboardTour, { TourStep } from '@/components/DashboardTour';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -65,6 +68,15 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const { profile } = useWallet();
 
+  const searchBarRef = useRef<View | null>(null);
+  const firstCardRef = useRef<View | null>(null);
+  const [showHomeTour, setShowHomeTour] = useState(false);
+  const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
+  const [financeEnabled, setFinanceEnabled] = useState<boolean | null>(null);
+  const [otherCountriesEnabled, setOtherCountriesEnabled] = useState(false);
+  const [focusTrigger, setFocusTrigger] = useState(0);
+  const homeTourShownRef = useRef(false);
+
   const [provider, setProvider] = useState<ProviderCode>('server-b');
 
   // Server B
@@ -104,6 +116,37 @@ export default function HomeScreen() {
   const [sheetService, setSheetService] = useState<ServiceItem | null>(null);
   const [sheetPackage, setSheetPackage] = useState<{ country: Country; pkg: Package } | null>(null);
   const sheetAnim = useRef(new Animated.Value(0)).current;
+
+  // ── Tours ─────────────────────────────────────────────────────────────────
+
+  useFocusEffect(
+    useCallback(() => {
+      homeTourShownRef.current = false;
+      setFocusTrigger((n) => n + 1);
+      Promise.all([
+        getSetting<boolean>('tab_tours_always_show', false),
+        getSetting<boolean>('finance_enabled', true),
+        getSetting<boolean>('other_countries_enabled', false),
+      ]).then(([tours, finance, otherCountries]) => {
+        setTabToursAlwaysShow(tours);
+        setFinanceEnabled(finance !== false);
+        setOtherCountriesEnabled(!!otherCountries);
+      });
+      return () => {
+        setShowHomeTour(false);
+      };
+    }, [])
+  );
+
+  useEffect(() => {
+    if (tabToursAlwaysShow !== null && !homeTourShownRef.current) {
+      const tourSeen = profile?.tours_seen?.home;
+      if (tabToursAlwaysShow || !tourSeen) {
+        homeTourShownRef.current = true;
+        setShowHomeTour(true);
+      }
+    }
+  }, [tabToursAlwaysShow, profile, focusTrigger]);
 
   // ── Provider switch ───────────────────────────────────────────────────────
 
@@ -213,6 +256,7 @@ export default function HomeScreen() {
 
   const serverBSections: ServiceSection[] = React.useMemo(() => {
     const filtered = allServices.filter((s) => {
+      if (financeEnabled !== true && s.category === 'Finance') return false;
       const q = searchQuery.toLowerCase();
       return (
         (s.title.toLowerCase().includes(q) || s.country_code.toLowerCase().includes(q)) &&
@@ -226,17 +270,18 @@ export default function HomeScreen() {
 
     const order: ServiceCategory[] = ['Social', 'Messaging', 'Finance', 'Shopping', 'Other'];
     return order
+      .filter((cat) => financeEnabled === true || cat !== 'Finance')
       .map((cat) => ({ category: cat, data: filtered.filter((s) => s.category === cat) }))
       .filter((sec) => sec.data.length > 0);
-  }, [allServices, searchQuery, activeCat]);
+  }, [allServices, searchQuery, activeCat, financeEnabled]);
 
-  const catCounts = React.useMemo(() =>
-    SERVICE_CATEGORIES.reduce((acc, cat) => {
-      acc[cat] = cat === 'All' ? allServices.length : allServices.filter((s) => s.category === cat).length;
+  const catCounts = React.useMemo(() => {
+    const visibleServices = financeEnabled === true ? allServices : allServices.filter((s) => s.category !== 'Finance');
+    return SERVICE_CATEGORIES.reduce((acc, cat) => {
+      acc[cat] = cat === 'All' ? visibleServices.length : visibleServices.filter((s) => s.category === cat).length;
       return acc;
-    }, {} as Record<ServiceCategory, number>),
-    [allServices]
-  );
+    }, {} as Record<ServiceCategory, number>);
+  }, [allServices, financeEnabled]);
 
   // ── Server A ──────────────────────────────────────────────────────────────
 
@@ -343,6 +388,7 @@ export default function HomeScreen() {
     setSheetPriceReady(false);
     Animated.spring(sheetAnim, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
 
+
     const cached = priceCache.current.get(svc.country_code);
     if (cached !== undefined) {
       if (cached) setSheetService((prev) => prev ? { ...prev, package: cached } : prev);
@@ -433,26 +479,28 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Provider tabs */}
-      <View style={styles.providerRow}>
-        {PROVIDERS.map((p) => {
-          const active = provider === p.code;
-          return (
-            <TouchableOpacity
-              key={p.code}
-              style={[styles.providerTab, active && styles.providerTabActive]}
-              onPress={async () => { await Haptics.selectionAsync(); setProvider(p.code); }}
-              activeOpacity={0.8}
-            >
-              <MaterialIcons name={p.icon as any} size={16} color={active ? Colors.primary : Colors.textMuted} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.providerTabLabel, active && styles.providerTabLabelActive]}>{p.label}</Text>
-                <Text style={styles.providerTabDesc}>{p.desc}</Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {/* Provider tabs — only shown when Other Countries is enabled in admin */}
+      {otherCountriesEnabled && (
+        <View style={styles.providerRow}>
+          {PROVIDERS.map((p) => {
+            const active = provider === p.code;
+            return (
+              <TouchableOpacity
+                key={p.code}
+                style={[styles.providerTab, active && styles.providerTabActive]}
+                onPress={async () => { await Haptics.selectionAsync(); setProvider(p.code); }}
+                activeOpacity={0.8}
+              >
+                <MaterialIcons name={p.icon as any} size={16} color={active ? Colors.primary : Colors.textMuted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.providerTabLabel, active && styles.providerTabLabelActive]}>{p.label}</Text>
+                  <Text style={styles.providerTabDesc}>{p.desc}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
 
       {/* ═══ SERVER B ═══ */}
       {provider === 'server-b' && (
@@ -505,14 +553,14 @@ export default function HomeScreen() {
               )}
 
               {/* Search */}
-              <View style={styles.searchWrap}>
+              <View ref={searchBarRef} style={styles.searchWrap}>
                 <View style={styles.searchBar}>
                   <MaterialIcons name="search" size={18} color={Colors.textMuted} />
                   <TextInput
                     style={styles.searchInput}
                     value={searchQuery}
                     onChangeText={setSearchQuery}
-                    placeholder="Search TikTok, WhatsApp, PayPal..."
+                    placeholder={financeEnabled === true ? 'Search TikTok, WhatsApp, PayPal...' : 'Search TikTok, WhatsApp...'}
                     placeholderTextColor={Colors.textMuted}
                     returnKeyType="search"
                   />
@@ -531,7 +579,7 @@ export default function HomeScreen() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.chipRow}
                 >
-                  {SERVICE_CATEGORIES.filter((c) => catCounts[c] > 0 || c === 'All').map((cat) => {
+                  {SERVICE_CATEGORIES.filter((c) => (financeEnabled === true || c !== 'Finance') && (catCounts[c] > 0 || c === 'All')).map((cat) => {
                     const active = activeCat === cat;
                     return (
                       <TouchableOpacity
@@ -595,9 +643,10 @@ export default function HomeScreen() {
                   renderItem={({ item, index, section }) => {
                     if (index % 2 !== 0) return null;
                     const next = section.data[index + 1];
+                    const isFirstCard = index === 0 && section === serverBSections[0];
                     return (
                       <View style={styles.row}>
-                        <ServiceCard service={item} onPress={() => openSheetService(item)} />
+                        <ServiceCard ref={isFirstCard ? firstCardRef : undefined} service={item} onPress={() => openSheetService(item)} />
                         {next
                           ? <ServiceCard service={next} onPress={() => openSheetService(next)} />
                           : <View style={styles.cardWrap} />
@@ -612,8 +661,8 @@ export default function HomeScreen() {
         </>
       )}
 
-      {/* ═══ SERVER A — COMING SOON ═══ */}
-      {provider === 'server-a' && (
+      {/* ═══ SERVER A — COMING SOON (only shown when Other Countries toggle is ON) ═══ */}
+      {otherCountriesEnabled && provider === 'server-a' && (
         <View style={styles.comingSoonContainer}>
           <View style={styles.comingSoonCard}>
             <View style={styles.comingSoonIconWrap}>
@@ -638,6 +687,20 @@ export default function HomeScreen() {
             <Text style={styles.switchUsBtnText}>Browse US Numbers Instead</Text>
           </TouchableOpacity>
         </View>
+      )}
+
+      {/* ═══ HOME TOURS ═══ */}
+      {showHomeTour && (
+        <DashboardTour
+          steps={[
+            { ref: searchBarRef, title: 'Search for any service', body: financeEnabled === true ? 'Type a platform name — TikTok, WhatsApp, PayPal — to find it instantly.' : 'Type a platform name — TikTok, WhatsApp — to find it instantly.' },
+            { ref: firstCardRef, title: 'Tap a card to see the price and buy a number', body: 'Each card shows the price. Tap it, then confirm your purchase.' },
+          ] as TourStep[]}
+          visible={showHomeTour}
+          skippable
+          onComplete={async () => { setShowHomeTour(false); await markTourSeen('home'); }}
+          onSkip={async () => { setShowHomeTour(false); await markTourSeen('home'); }}
+        />
       )}
 
       {/* ═══ BOTTOM SHEET ═══ */}
@@ -678,7 +741,7 @@ export default function HomeScreen() {
             <View style={styles.sheetDetails}>
               {[
                 { label: 'Your number', value: '🔒 +1 (***) ***-****' },
-                { label: 'OTP delivery', value: 'Auto-captured within 10 min' },
+                { label: 'OTP delivery', value: 'Auto-captured within 5 min' },
                 { label: 'Refund policy', value: 'Auto-refund if no OTP in 5 mins', green: true },
               ].map((row) => (
                 <View key={row.label} style={styles.sheetRow}>
@@ -735,7 +798,8 @@ function getFlagEmoji(code: string): string {
 
 // ── Service Card (Server B) ───────────────────────────────────────────────────
 
-function ServiceCard({ service, onPress }: { service: ServiceItem; onPress: () => void }) {
+const ServiceCard = React.forwardRef<View, { service: ServiceItem; onPress: () => void }>(
+  function ServiceCard({ service, onPress }, ref) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const onPressIn = () => Animated.spring(scaleAnim, { toValue: 0.95, useNativeDriver: true, speed: 30 }).start();
   const onPressOut = () => Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30 }).start();
@@ -746,7 +810,7 @@ function ServiceCard({ service, onPress }: { service: ServiceItem; onPress: () =
   const isPopular = getServicePopularityRank(service.title) < 18;
 
   return (
-    <Animated.View style={[styles.cardWrap, { transform: [{ scale: scaleAnim }] }]}>
+    <Animated.View ref={ref} style={[styles.cardWrap, { transform: [{ scale: scaleAnim }] }]}>
       <TouchableOpacity
         style={styles.card}
         onPress={onPress}
@@ -777,7 +841,7 @@ function ServiceCard({ service, onPress }: { service: ServiceItem; onPress: () =
       </TouchableOpacity>
     </Animated.View>
   );
-}
+});
 
 // ── Package Card (Server A) ───────────────────────────────────────────────────
 

@@ -193,25 +193,6 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Careers */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Careers</Text>
-          <View style={styles.menuCard}>
-            <TouchableOpacity
-              style={[styles.menuRow, { borderBottomWidth: 0 }]}
-              onPress={async () => {
-                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                await WebBrowser.openBrowserAsync('https://numvault.cloud/jobs');
-              }}
-              activeOpacity={0.7}
-            >
-              <MaterialIcons name="work-outline" size={18} color={Colors.textMuted} />
-              <Text style={[styles.menuLabel, { color: Colors.text }]}>Open positions at NumVault</Text>
-              <MaterialIcons name="chevron-right" size={18} color={Colors.textMuted} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
         {/* ── Admin panel — visible only to ADMIN_EMAIL ── */}
         {isAdmin ? (
           <View style={styles.section}>

@@ -183,11 +183,19 @@ export default function AdminDashboardScreen() {
   const [jobAdLoading, setJobAdLoading] = useState(false);
   const [jobAdSaving, setJobAdSaving] = useState(false);
   const [jobAdDirty, setJobAdDirty] = useState(false);
+  const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState(false);
+  const [tabToursAlwaysShowSaving, setTabToursAlwaysShowSaving] = useState(false);
+  const [checkoutIntroAlwaysShow, setCheckoutIntroAlwaysShow] = useState(false);
+  const [checkoutIntroAlwaysShowSaving, setCheckoutIntroAlwaysShowSaving] = useState(false);
+  const [financeEnabled, setFinanceEnabled] = useState(true);
+  const [financeEnabledSaving, setFinanceEnabledSaving] = useState(false);
+  const [otherCountriesEnabled, setOtherCountriesEnabled] = useState(false);
+  const [otherCountriesEnabledSaving, setOtherCountriesEnabledSaving] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setJobAdLoading(true);
     try {
-      const [scale, steps, margin, tourForce, appOnboardingForce, acqLandingForce, acqProgramVisibleSetting, skipQualificationSetting] = await Promise.all([
+      const [scale, steps, margin, tourForce, appOnboardingForce, acqLandingForce, acqProgramVisibleSetting, skipQualificationSetting, tabToursAlwaysShowSetting, checkoutIntroAlwaysShowSetting, financeEnabledSetting, otherCountriesEnabledSetting] = await Promise.all([
         getSetting<boolean>('scale_mode_enabled', false),
         getSetting<JobAdStep[] | null>('job_ad_content', null),
         getSetting<number>('flat_acquisition_fee', 1500),
@@ -196,6 +204,10 @@ export default function AdminDashboardScreen() {
         getSetting<boolean>('acquisition_landing_force_every_session', true),
         getSetting<boolean>('acquisition_program_visible', true),
         getSetting<boolean>('skip_qualification_month', false),
+        getSetting<boolean>('tab_tours_always_show', false),
+        getSetting<boolean>('checkout_intro_always_show', false),
+        getSetting<boolean>('finance_enabled', true),
+        getSetting<boolean>('other_countries_enabled', false),
       ]);
       setScaleMode(!!scale);
       setJobAdSteps(steps ?? DEFAULT_JOB_AD_STEPS);
@@ -207,6 +219,10 @@ export default function AdminDashboardScreen() {
       setAcqLandingForceEverySession(!!acqLandingForce);
       setAcqProgramVisible(!!acqProgramVisibleSetting);
       setSkipQualificationMonth(!!skipQualificationSetting);
+      setTabToursAlwaysShow(!!tabToursAlwaysShowSetting);
+      setCheckoutIntroAlwaysShow(!!checkoutIntroAlwaysShowSetting);
+      setFinanceEnabled(financeEnabledSetting !== false);
+      setOtherCountriesEnabled(!!otherCountriesEnabledSetting);
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -304,6 +320,66 @@ export default function AdminDashboardScreen() {
       showAlert('Could not save', e.message || 'Failed to update the qualification month setting.');
     } finally {
       setSkipQualificationMonthToggleSaving(false);
+    }
+  };
+
+  const toggleTabToursAlwaysShow = async (value: boolean) => {
+    setTabToursAlwaysShowSaving(true);
+    const previous = tabToursAlwaysShow;
+    setTabToursAlwaysShow(value);
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('tab_tours_always_show', value);
+    } catch (e: any) {
+      setTabToursAlwaysShow(previous);
+      showAlert('Could not save', e.message || 'Failed to update the tab tours setting.');
+    } finally {
+      setTabToursAlwaysShowSaving(false);
+    }
+  };
+
+  const toggleCheckoutIntroAlwaysShow = async (value: boolean) => {
+    setCheckoutIntroAlwaysShowSaving(true);
+    const previous = checkoutIntroAlwaysShow;
+    setCheckoutIntroAlwaysShow(value);
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('checkout_intro_always_show', value);
+    } catch (e: any) {
+      setCheckoutIntroAlwaysShow(previous);
+      showAlert('Could not save', e.message || 'Failed to update the checkout intro setting.');
+    } finally {
+      setCheckoutIntroAlwaysShowSaving(false);
+    }
+  };
+
+  const toggleOtherCountriesEnabled = async (value: boolean) => {
+    setOtherCountriesEnabledSaving(true);
+    const previous = otherCountriesEnabled;
+    setOtherCountriesEnabled(value);
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('other_countries_enabled', value);
+    } catch (e: any) {
+      setOtherCountriesEnabled(previous);
+      showAlert('Could not save', e.message || 'Failed to update the Other Countries setting.');
+    } finally {
+      setOtherCountriesEnabledSaving(false);
+    }
+  };
+
+  const toggleFinanceEnabled = async (value: boolean) => {
+    setFinanceEnabledSaving(true);
+    const previous = financeEnabled;
+    setFinanceEnabled(value);
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await setSetting('finance_enabled', value);
+    } catch (e: any) {
+      setFinanceEnabled(previous);
+      showAlert('Could not save', e.message || 'Failed to update the finance setting.');
+    } finally {
+      setFinanceEnabledSaving(false);
     }
   };
 
@@ -1079,167 +1155,15 @@ export default function AdminDashboardScreen() {
         {/* ─────────────────── SETTINGS ─────────────────── */}
         {activeTab === 'settings' && (
           <>
-            <View style={settingsStyles.card}>
-              <View style={settingsStyles.rowBetween}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={settingsStyles.cardTitle}>Scale mode</Text>
-                  <Text style={settingsStyles.cardSub}>
-                    {scaleMode
-                      ? 'ON — uncapped, batched Socially.ng top-ups that grow with demand.'
-                      : 'OFF — using the standard top-up: ₦40,000–₦200,000 based on the last hour of sales.'}
-                  </Text>
-                </View>
-                {scaleModeToggleSaving ? (
-                  <ActivityIndicator color={GREEN} />
-                ) : (
-                  <Switch
-                    value={scaleMode}
-                    onValueChange={toggleScaleMode}
-                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
-                    thumbColor={scaleMode ? GREEN : MUTED}
-                  />
-                )}
-              </View>
-              <Text style={settingsStyles.hint}>
-                Uncapped, batched, demand-based top-ups that grow with demand.
-              </Text>
-            </View>
-
-            <View style={settingsStyles.card}>
-              <View style={settingsStyles.rowBetween}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={settingsStyles.cardTitle}>Dashboard tour on every app start</Text>
-                  <Text style={settingsStyles.cardSub}>
-                    {tourForceEverySession
-                      ? 'ON — the acquisition dashboard coach mark shows every time the app starts a new session, for every user.'
-                      : 'OFF — the coach mark shows only once ever, per user, the first time they reach the dashboard.'}
-                  </Text>
-                </View>
-                {tourToggleSaving ? (
-                  <ActivityIndicator color={GREEN} />
-                ) : (
-                  <Switch
-                    value={tourForceEverySession}
-                    onValueChange={toggleTourForceEverySession}
-                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
-                    thumbColor={tourForceEverySession ? GREEN : MUTED}
-                  />
-                )}
-              </View>
-              <Text style={settingsStyles.hint}>
-                Takes effect immediately — no app update needed. Turn it off to go back to showing it just once per user.
-              </Text>
-            </View>
-
-            <View style={settingsStyles.card}>
-              <View style={settingsStyles.rowBetween}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={settingsStyles.cardTitle}>App intro on every launch</Text>
-                  <Text style={settingsStyles.cardSub}>
-                    {appOnboardingForceEverySession
-                      ? 'ON — the 3-slide app intro shows every time the app is opened, for everyone.'
-                      : 'OFF — the app intro shows only once ever, on first launch on each device.'}
-                  </Text>
-                </View>
-                {appOnboardingToggleSaving ? (
-                  <ActivityIndicator color={GREEN} />
-                ) : (
-                  <Switch
-                    value={appOnboardingForceEverySession}
-                    onValueChange={toggleAppOnboardingForceEverySession}
-                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
-                    thumbColor={appOnboardingForceEverySession ? GREEN : MUTED}
-                  />
-                )}
-              </View>
-              <Text style={settingsStyles.hint}>
-                Takes effect immediately — no app update needed.
-              </Text>
-            </View>
-
-            <View style={settingsStyles.card}>
-              <View style={settingsStyles.rowBetween}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={settingsStyles.cardTitle}>Job pitch on every visit</Text>
-                  <Text style={settingsStyles.cardSub}>
-                    {acqLandingForceEverySession
-                      ? 'ON — the acquisition program pitch screens show every time someone opens that screen.'
-                      : 'OFF — the pitch screens show only once ever per user; returning visitors go straight to their dashboard or the enrollment form.'}
-                  </Text>
-                </View>
-                {acqLandingToggleSaving ? (
-                  <ActivityIndicator color={GREEN} />
-                ) : (
-                  <Switch
-                    value={acqLandingForceEverySession}
-                    onValueChange={toggleAcqLandingForceEverySession}
-                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
-                    thumbColor={acqLandingForceEverySession ? GREEN : MUTED}
-                  />
-                )}
-              </View>
-              <Text style={settingsStyles.hint}>
-                Takes effect immediately — no app update needed. The job text itself is still edited below.
-              </Text>
-            </View>
-
-            <View style={settingsStyles.card}>
-              <View style={settingsStyles.rowBetween}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={settingsStyles.cardTitle}>Acquisition program in Profile</Text>
-                  <Text style={settingsStyles.cardSub}>
-                    {acqProgramVisible
-                      ? 'ON — the "Acquisition Program for Students" banner shows in the Profile tab, same as today.'
-                      : 'OFF — the banner is hidden from Profile. Everything else on that screen stays the same, and existing leads keep their own dashboard access.'}
-                  </Text>
-                </View>
-                {acqProgramVisibleToggleSaving ? (
-                  <ActivityIndicator color={GREEN} />
-                ) : (
-                  <Switch
-                    value={acqProgramVisible}
-                    onValueChange={toggleAcqProgramVisible}
-                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
-                    thumbColor={acqProgramVisible ? GREEN : MUTED}
-                  />
-                )}
-              </View>
-              <Text style={settingsStyles.hint}>
-                Takes effect immediately — no app update needed.
-              </Text>
-            </View>
-
-            <View style={settingsStyles.card}>
-              <View style={settingsStyles.rowBetween}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={settingsStyles.cardTitle}>Skip the unpaid qualification month</Text>
-                  <Text style={settingsStyles.cardSub}>
-                    {skipQualificationMonth
-                      ? 'ON — new leads (and anyone re-enrolling) start earning from customer #1, no unpaid month first. Still 6 rounds and ₦600,000 total, just without the free first month\'s margin.'
-                      : 'OFF — every new lead still does an unpaid month of 76 customers before round 1 starts, same as today.'}
-                  </Text>
-                </View>
-                {skipQualificationMonthToggleSaving ? (
-                  <ActivityIndicator color={GREEN} />
-                ) : (
-                  <Switch
-                    value={skipQualificationMonth}
-                    onValueChange={toggleSkipQualificationMonth}
-                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
-                    thumbColor={skipQualificationMonth ? GREEN : MUTED}
-                  />
-                )}
-              </View>
-              <Text style={settingsStyles.hint}>
-                Only affects leads who enroll or re-enroll after this is turned on — nobody already qualifying is moved.
-              </Text>
-            </View>
+            {/* ── Pricing and payments ── */}
+            <Text style={settingsStyles.sectionHeader}>Pricing and payments</Text>
 
             <View style={settingsStyles.card}>
               <Text style={settingsStyles.cardTitle}>Margin per number sale</Text>
               <Text style={settingsStyles.cardSub}>
                 Added on top of wholesale cost for every number, across all providers and services. Takes effect immediately on save — no app update needed.
               </Text>
+              <Text style={settingsStyles.desc}>On: your margin is applied. Off (set to ₦0): numbers sell at cost.</Text>
               <View style={[settingsStyles.rowBetween, { alignItems: 'center', marginTop: 4 }]}>
                 <View style={settingsStyles.marginInputWrap}>
                   <Text style={settingsStyles.marginPrefix}>₦</Text>
@@ -1263,6 +1187,252 @@ export default function AdminDashboardScreen() {
                   )}
                 </TouchableOpacity>
               </View>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Scale mode</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {scaleMode
+                      ? 'ON — uncapped, batched Socially.ng top-ups that grow with demand.'
+                      : 'OFF — using the standard top-up: ₦40,000–₦200,000 based on the last hour of sales.'}
+                  </Text>
+                </View>
+                {scaleModeToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={scaleMode}
+                    onValueChange={toggleScaleMode}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={scaleMode ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: uncapped batched top-ups. Off: standard ₦40k–₦200k based on recent sales.</Text>
+            </View>
+
+            {/* ── Customer tours and intros ── */}
+            <Text style={settingsStyles.sectionHeader}>Customer tours and intros</Text>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>App intro on every launch</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {appOnboardingForceEverySession
+                      ? 'ON — the 3-slide app intro shows every time the app is opened, for everyone.'
+                      : 'OFF — the app intro shows only once ever, on first launch on each device.'}
+                  </Text>
+                </View>
+                {appOnboardingToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={appOnboardingForceEverySession}
+                    onValueChange={toggleAppOnboardingForceEverySession}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={appOnboardingForceEverySession ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: intro plays on every app open. Off: plays once per device, then never again.</Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Tab tours always show</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {tabToursAlwaysShow
+                      ? 'ON — Home, Wallet, and Orders coach-mark tours show on every tab open, ignoring whether the user has seen them.'
+                      : 'OFF — each tab tour shows once per user, then never again.'}
+                  </Text>
+                </View>
+                {tabToursAlwaysShowSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={tabToursAlwaysShow}
+                    onValueChange={toggleTabToursAlwaysShow}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={tabToursAlwaysShow ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: tab tours repeat every visit (useful for testing). Off: each tour shows once, then stops.</Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Checkout intro always show</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {checkoutIntroAlwaysShow
+                      ? 'ON — the checkout coach-mark tour shows on every purchase attempt, for all users.'
+                      : 'OFF — the checkout tour shows once, on the first purchase attempt, then never again.'}
+                  </Text>
+                </View>
+                {checkoutIntroAlwaysShowSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={checkoutIntroAlwaysShow}
+                    onValueChange={toggleCheckoutIntroAlwaysShow}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={checkoutIntroAlwaysShow ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: checkout tour repeats on every purchase (useful for testing). Off: shows once at first purchase, then stops.</Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Other Countries</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {otherCountriesEnabled
+                      ? 'ON — the "Other Countries" tab is visible on the home screen.'
+                      : 'OFF — home screen shows US Numbers only. Other Countries tab is hidden.'}
+                  </Text>
+                </View>
+                {otherCountriesEnabledSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={otherCountriesEnabled}
+                    onValueChange={toggleOtherCountriesEnabled}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={otherCountriesEnabled ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>Turn ON when Other Countries provider is ready to launch. Off by default (avoids Apple guideline issues with "Coming Soon" screens).</Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Finance category</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {financeEnabled
+                      ? 'ON — Finance services (e.g. PayPal) are visible in search, category pills, and the home feed.'
+                      : 'OFF — Finance services are hidden from search, category pills, and the home feed.'}
+                  </Text>
+                </View>
+                {financeEnabledSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={financeEnabled}
+                    onValueChange={toggleFinanceEnabled}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={financeEnabled ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: Finance pill and PayPal in search placeholder appear for all users. Off: Finance is fully hidden.</Text>
+            </View>
+
+            {/* ── Ambassador program ── */}
+            <Text style={settingsStyles.sectionHeader}>Ambassador program</Text>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Acquisition program in Profile</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {acqProgramVisible
+                      ? 'ON — the "Acquisition Program for Students" banner shows in the Profile tab.'
+                      : 'OFF — the banner is hidden from Profile. Existing leads still have their dashboard.'}
+                  </Text>
+                </View>
+                {acqProgramVisibleToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={acqProgramVisible}
+                    onValueChange={toggleAcqProgramVisible}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={acqProgramVisible ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: the ambassador recruitment banner shows in Profile. Off: banner hidden — no new enrollments.</Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Skip the unpaid qualification month</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {skipQualificationMonth
+                      ? "ON — new leads start earning from customer #1, no unpaid month first."
+                      : 'OFF — new leads do an unpaid month of 76 customers before round 1, same as today.'}
+                  </Text>
+                </View>
+                {skipQualificationMonthToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={skipQualificationMonth}
+                    onValueChange={toggleSkipQualificationMonth}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={skipQualificationMonth ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: ambassadors earn from day 1. Off: 1-month unpaid qualification before paid rounds begin.</Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Job pitch on every visit</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {acqLandingForceEverySession
+                      ? 'ON — the acquisition program pitch screens show every time someone opens that screen.'
+                      : 'OFF — pitch shows once per user; returning visitors go straight to their dashboard or form.'}
+                  </Text>
+                </View>
+                {acqLandingToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={acqLandingForceEverySession}
+                    onValueChange={toggleAcqLandingForceEverySession}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={acqLandingForceEverySession ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: pitch screens replay on every visit. Off: seen-once, then skip straight to the form or dashboard.</Text>
+            </View>
+
+            <View style={settingsStyles.card}>
+              <View style={settingsStyles.rowBetween}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={settingsStyles.cardTitle}>Ambassador dashboard tour on every app start</Text>
+                  <Text style={settingsStyles.cardSub}>
+                    {tourForceEverySession
+                      ? 'ON — the ambassador dashboard coach mark shows every time the app starts a new session.'
+                      : 'OFF — the coach mark shows only once ever, per user, the first time they reach the dashboard.'}
+                  </Text>
+                </View>
+                {tourToggleSaving ? (
+                  <ActivityIndicator color={GREEN} />
+                ) : (
+                  <Switch
+                    value={tourForceEverySession}
+                    onValueChange={toggleTourForceEverySession}
+                    trackColor={{ false: BORDER2, true: 'rgba(74,222,128,0.4)' }}
+                    thumbColor={tourForceEverySession ? GREEN : MUTED}
+                  />
+                )}
+              </View>
+              <Text style={settingsStyles.desc}>On: ambassador coach-mark tour repeats every session. Off: shows once, then never again.</Text>
             </View>
 
             <View style={settingsStyles.card}>
@@ -1554,6 +1724,12 @@ const settingsStyles = StyleSheet.create({
   cardTitle: { fontSize: 14, fontWeight: '700', color: TEXT },
   cardSub: { fontSize: 12, color: TEXT2, lineHeight: 18 },
   hint: { fontSize: 11, color: MUTED, lineHeight: 16, marginTop: 4 },
+  desc: { fontSize: 11, color: MUTED, lineHeight: 16, marginTop: 2 },
+  sectionHeader: {
+    fontSize: 11, fontWeight: '800', color: GREEN, letterSpacing: 1.5,
+    textTransform: 'uppercase', marginTop: 8, marginBottom: 4, paddingHorizontal: 2,
+    textShadowColor: 'rgba(74,222,128,0.5)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 8,
+  },
   resetLink: { fontSize: 12, color: ORANGE, fontWeight: '600' },
   marginInputWrap: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
@@ -1580,117 +1756,198 @@ const settingsStyles = StyleSheet.create({
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
-  center: { alignItems: 'center', justifyContent: 'center', gap: 16 },
-  accessDeniedIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: RED_BG, borderWidth: 1, borderColor: RED + '55', alignItems: 'center', justifyContent: 'center' },
-  accessDeniedTitle: { fontSize: 20, fontWeight: '700', color: TEXT },
-  accessDeniedSub: { fontSize: 13, color: TEXT2, textAlign: 'center' },
-  accessDeniedBtn: { backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 100, paddingHorizontal: 24, paddingVertical: 12 },
-  accessDeniedBtnText: { color: TEXT2, fontSize: 14, fontWeight: '600' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12 },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: BORDER },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER2, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  refreshBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: TEXT },
+  center: { alignItems: 'center', justifyContent: 'center' },
+  header: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16,
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: BORDER, gap: 10,
+  },
+  backBtn: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: SURFACE,
+    borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center',
+  },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: TEXT },
   headerSub: { fontSize: 11, color: MUTED, marginTop: 1 },
-  tabBarWrap: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 12, backgroundColor: '#111a11', borderWidth: 1, borderColor: BORDER2, borderRadius: 14, padding: 4, gap: 2 },
-  tabItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 9, borderRadius: 10 },
-  tabItemActive: { backgroundColor: '#1a3a1a' },
-  tabItemText: { fontSize: 11, fontWeight: '500', color: MUTED },
-  tabItemTextActive: { color: GREEN, fontWeight: '700' },
-  tabBadge: { backgroundColor: BORDER, borderRadius: 100, minWidth: 16, paddingHorizontal: 4, height: 16, alignItems: 'center', justifyContent: 'center' },
-  tabBadgeActive: { backgroundColor: 'rgba(74,222,128,0.2)' },
+  refreshBtn: {
+    width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+  },
+  tabBarWrap: {
+    flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER,
+    paddingHorizontal: 8,
+  },
+  tabItem: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 10, gap: 4, borderBottomWidth: 2, borderBottomColor: 'transparent',
+  },
+  tabItemActive: { borderBottomColor: GREEN },
+  tabItemText: { fontSize: 11, color: MUTED, fontWeight: '600' },
+  tabItemTextActive: { color: GREEN },
+  tabBadge: {
+    minWidth: 16, height: 16, borderRadius: 8, backgroundColor: SURFACE2,
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+  },
+  tabBadgeActive: { backgroundColor: 'rgba(74,222,128,0.18)' },
   tabBadgeText: { fontSize: 9, fontWeight: '700', color: MUTED },
   tabBadgeTextActive: { color: GREEN },
-  content: { paddingHorizontal: 16, gap: 10 },
-  alertBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: GOLD_BG, borderWidth: 1, borderColor: GOLD + '55', borderRadius: 12, padding: 13 },
-  alertBannerRed: { backgroundColor: RED_BG, borderColor: RED + '55' },
-  alertBannerDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: GOLD, flexShrink: 0 },
-  alertBannerText: { flex: 1, fontSize: 12, fontWeight: '500', color: GOLD },
-  sectionLabel: { marginTop: 4 },
-  sectionLabelText: { fontSize: 10, fontWeight: '700', color: MUTED2, letterSpacing: 1.2 },
+  content: { paddingTop: 12, paddingHorizontal: 14, gap: 10 },
+  alertBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: GOLD_BG,
+    borderWidth: 1, borderColor: GOLD + '44', borderRadius: 12, padding: 12,
+  },
+  alertBannerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: GOLD },
+  alertBannerText: { flex: 1, fontSize: 13, fontWeight: '600', color: GOLD },
+  alertBannerRed: { backgroundColor: RED_BG, borderColor: RED + '44' },
+  sectionLabel: { paddingTop: 4, paddingBottom: 2 },
+  sectionLabelText: { fontSize: 10, fontWeight: '700', color: MUTED2, letterSpacing: 1, textTransform: 'uppercase' },
   finRow: { flexDirection: 'row', gap: 10 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  filterRow: { gap: 8, paddingRight: 16, paddingBottom: 2 },
-  filterChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 100, paddingHorizontal: 14, paddingVertical: 8 },
-  filterChipActive: { borderColor: GREEN, backgroundColor: 'rgba(74,222,128,0.1)' },
-  filterChipText: { fontSize: 12, fontWeight: '500', color: TEXT2 },
-  filterChipTextActive: { color: GREEN, fontWeight: '700' },
-  filterChipCount: { fontSize: 11, fontWeight: '700', color: MUTED },
-  participantCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 14, padding: 14 },
-  participantAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(74,222,128,0.12)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.25)', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  participantAvatarText: { color: GREEN, fontSize: 16, fontWeight: '700' },
-  participantName: { fontSize: 14, fontWeight: '600', color: TEXT },
-  participantCode: { fontSize: 11, color: MUTED, letterSpacing: 0.5 },
-  participantMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  filterRow: { paddingVertical: 4, paddingHorizontal: 2, gap: 8 },
+  filterChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12,
+    paddingVertical: 7, borderRadius: 100, backgroundColor: SURFACE,
+    borderWidth: 1, borderColor: BORDER,
+  },
+  filterChipActive: { backgroundColor: 'rgba(74,222,128,0.12)', borderColor: GREEN + '66' },
+  filterChipText: { fontSize: 12, color: MUTED, fontWeight: '600' },
+  filterChipTextActive: { color: GREEN },
+  filterChipCount: { fontSize: 11, color: MUTED2, fontWeight: '600' },
+  participantCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: SURFACE,
+    borderWidth: 1, borderColor: BORDER, borderRadius: 14, padding: 14,
+  },
+  participantAvatar: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(74,222,128,0.12)',
+    borderWidth: 1, borderColor: GREEN + '44', alignItems: 'center', justifyContent: 'center',
+  },
+  participantAvatarText: { fontSize: 18, fontWeight: '700', color: GREEN },
+  participantName: { fontSize: 14, fontWeight: '700', color: TEXT },
+  participantCode: { fontSize: 11, color: MUTED, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  participantMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 1 },
   participantMeta: { fontSize: 11, color: TEXT2 },
   payoutSummaryRow: { flexDirection: 'row', gap: 8 },
-
-  // Review payout card
   reviewPayoutCard: {
-    backgroundColor: SURFACE, borderWidth: 1,
-    borderRadius: 16, padding: 16, gap: 12,
+    backgroundColor: SURFACE, borderWidth: 1, borderRadius: 14, padding: 14, gap: 10,
   },
-  reviewPayoutHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  payoutIconWrap: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  reviewPayoutHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  payoutIconWrap: {
+    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+  },
   reviewPayoutName: { fontSize: 14, fontWeight: '700', color: TEXT },
-  reviewPayoutMeta: { fontSize: 11, color: TEXT2, marginTop: 2 },
+  reviewPayoutMeta: { fontSize: 11, color: MUTED, marginTop: 2 },
   reviewPayoutAmount: { fontSize: 16, fontWeight: '700' },
-  statusChip: { borderWidth: 1, borderRadius: 100, paddingHorizontal: 7, paddingVertical: 2 },
+  statusChip: {
+    borderWidth: 1, borderRadius: 100, paddingHorizontal: 8, paddingVertical: 3,
+  },
   statusChipText: { fontSize: 10, fontWeight: '700' },
-
-  failureBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: RED_BG, borderWidth: 1, borderColor: RED + '44', borderRadius: 8, padding: 10 },
+  failureBox: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    backgroundColor: RED_BG, borderRadius: 8, padding: 8,
+  },
   failureText: { flex: 1, fontSize: 11, color: RED, lineHeight: 16 },
-  holdBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: ORANGE_BG, borderWidth: 1, borderColor: ORANGE + '44', borderRadius: 8, padding: 10 },
+  holdBox: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    backgroundColor: ORANGE_BG, borderRadius: 8, padding: 8,
+  },
   holdText: { flex: 1, fontSize: 11, color: ORANGE, lineHeight: 16 },
-
-  customerListWrap: { backgroundColor: SURFACE2, borderWidth: 1, borderColor: BORDER, borderRadius: 10, overflow: 'hidden' },
-  customerListTitle: { fontSize: 10, fontWeight: '700', color: MUTED2, letterSpacing: 1, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 },
-  customerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER },
-  customerIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.12)', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 },
-  customerEmail: { fontSize: 12, color: TEXT, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
-  customerName: { fontSize: 11, color: TEXT2, marginTop: 1 },
-  customerTime: { fontSize: 10, color: MUTED, marginTop: 1 },
-  customerNote: { fontSize: 10, fontWeight: '700', marginTop: 2 },
-  orderIdChip: { fontSize: 9, color: MUTED, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', flexShrink: 0, maxWidth: 70 },
-  noCustomersText: { fontSize: 11, color: MUTED, textAlign: 'center', paddingVertical: 12 },
-
-  payoutActions: { flexDirection: 'row', gap: 10 },
-  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 44, borderRadius: 10 },
-  approveBtn: { backgroundColor: GREEN },
-  approveBtnText: { color: BG, fontWeight: '700', fontSize: 13 },
-  rejectBtn: { borderWidth: 1, borderColor: ORANGE + '55', backgroundColor: ORANGE_BG },
-  rejectBtnText: { color: ORANGE, fontWeight: '700', fontSize: 13 },
-  retryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: GOLD + '55', backgroundColor: GOLD_BG, borderRadius: 10, height: 40 },
-  retryBtnText: { color: GOLD, fontWeight: '700', fontSize: 12 },
-
-  sentPayoutRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 12 },
+  customerListWrap: {
+    backgroundColor: SURFACE2, borderRadius: 10, borderWidth: 1, borderColor: BORDER2,
+    overflow: 'hidden',
+  },
+  customerListTitle: { fontSize: 11, fontWeight: '700', color: MUTED, padding: 10, paddingBottom: 6 },
+  customerRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10,
+    borderBottomWidth: 1, borderBottomColor: BORDER,
+  },
+  customerIcon: {
+    width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.1)',
+    alignItems: 'center', justifyContent: 'center', marginTop: 1,
+  },
+  customerEmail: { fontSize: 12, fontWeight: '600', color: TEXT2 },
+  customerName: { fontSize: 11, color: MUTED, marginTop: 1 },
+  customerTime: { fontSize: 10, color: MUTED2, marginTop: 1 },
+  customerNote: { fontSize: 10, marginTop: 1 },
+  noCustomersText: { fontSize: 12, color: MUTED, textAlign: 'center', paddingVertical: 16 },
+  payoutActions: { flexDirection: 'row', gap: 8, paddingTop: 4 },
+  actionBtn: { flex: 1, borderRadius: 10, paddingVertical: 11, alignItems: 'center', justifyContent: 'center' },
+  rejectBtn: { backgroundColor: SURFACE2, borderWidth: 1, borderColor: BORDER2 },
+  rejectBtnText: { fontSize: 13, fontWeight: '700', color: MUTED },
+  approveBtn: { backgroundColor: GREEN, flexDirection: 'row', gap: 6 },
+  approveBtnText: { fontSize: 13, fontWeight: '700', color: BG },
+  retryBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    borderWidth: 1, borderColor: GOLD + '66', borderRadius: 10, paddingVertical: 10,
+  },
+  retryBtnText: { fontSize: 13, fontWeight: '700', color: GOLD },
+  sentPayoutRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: SURFACE,
+    borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 12,
+  },
   sentPayoutName: { fontSize: 13, fontWeight: '600', color: TEXT },
-  sentPayoutMeta: { fontSize: 11, color: TEXT2, marginTop: 1 },
-  sentPayoutDate: { fontSize: 10, color: MUTED, marginTop: 1 },
-
-  // Reject modal
-  rejectOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  rejectSheet: { backgroundColor: SURFACE, borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: BORDER, padding: 24, gap: 16 },
-  rejectSheetTitle: { fontSize: 18, fontWeight: '700', color: TEXT },
-  rejectSheetSub: { fontSize: 13, color: TEXT2 },
-  rejectNoteInput: { backgroundColor: BG, borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14, color: TEXT, fontSize: 14, minHeight: 80, textAlignVertical: 'top' },
-  rejectSheetActions: { flexDirection: 'row', gap: 10 },
-  rejectCancelBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER, borderRadius: 10, height: 46 },
-  rejectCancelText: { color: TEXT2, fontWeight: '600', fontSize: 14 },
-  rejectConfirmBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: ORANGE_BG, borderWidth: 1, borderColor: ORANGE + '55', borderRadius: 10, height: 46 },
-  rejectConfirmText: { color: ORANGE, fontWeight: '700', fontSize: 14 },
-
-  // Detail modal
-  detailCard: { backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 14, overflow: 'hidden' },
-  detailCardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
-  detailCardDivider: { height: 1, backgroundColor: BORDER },
-  detailLabel: { fontSize: 13, color: TEXT2 },
-  detailValue: { fontSize: 13, fontWeight: '600', color: TEXT, textAlign: 'right', flex: 1 },
-  mono: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12 },
-  emptyDetailText: { fontSize: 12, color: MUTED, textAlign: 'center', padding: 20 },
-  refCustomerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 10, padding: 12 },
-  refCustomerIcon: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  refCustomerId: { fontSize: 11, color: TEXT2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
-  refCustomerMeta: { fontSize: 10, color: MUTED, marginTop: 2 },
-  refCustomerStatus: { fontSize: 11, fontWeight: '700', flexShrink: 0 },
+  sentPayoutMeta: { fontSize: 11, color: MUTED, marginTop: 2 },
+  sentPayoutDate: { fontSize: 10, color: MUTED2, marginTop: 1 },
+  modalHeader: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16,
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: BORDER, gap: 10,
+  },
+  detailCard: {
+    backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 14, overflow: 'hidden',
+  },
+  detailCardRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  detailLabel: { fontSize: 12, color: MUTED },
+  detailValue: { fontSize: 13, fontWeight: '600', color: TEXT, maxWidth: '60%', textAlign: 'right' },
+  mono: { fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 12 },
+  detailCardDivider: { height: 1, backgroundColor: BORDER, marginHorizontal: 14 },
+  emptyDetailText: { fontSize: 12, color: MUTED, textAlign: 'center', paddingVertical: 20 },
+  refCustomerRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: SURFACE,
+    borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 12,
+  },
+  refCustomerIcon: {
+    width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+  },
+  refCustomerId: { fontSize: 12, fontWeight: '600', color: TEXT2 },
+  refCustomerMeta: { fontSize: 11, color: MUTED, marginTop: 2 },
+  refCustomerStatus: { fontSize: 11, fontWeight: '700' },
+  rejectOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end',
+  },
+  rejectSheet: {
+    backgroundColor: SURFACE, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 24, gap: 12,
+  },
+  rejectSheetTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
+  rejectSheetSub: { fontSize: 13, color: MUTED },
+  rejectNoteInput: {
+    backgroundColor: SURFACE2, borderWidth: 1, borderColor: BORDER2, borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12, color: TEXT, fontSize: 13,
+    textAlignVertical: 'top', minHeight: 80,
+  },
+  rejectSheetActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  rejectCancelBtn: {
+    flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center',
+    backgroundColor: SURFACE2, borderWidth: 1, borderColor: BORDER2,
+  },
+  rejectCancelText: { fontSize: 14, fontWeight: '700', color: MUTED },
+  rejectConfirmBtn: {
+    flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center',
+    backgroundColor: ORANGE_BG, borderWidth: 1, borderColor: ORANGE + '66',
+  },
+  rejectConfirmText: { fontSize: 14, fontWeight: '700', color: ORANGE },
+  accessDeniedIcon: {
+    width: 64, height: 64, borderRadius: 32, backgroundColor: RED_BG,
+    borderWidth: 1, borderColor: RED + '44', alignItems: 'center', justifyContent: 'center',
+    marginBottom: 16,
+  },
+  accessDeniedTitle: { fontSize: 20, fontWeight: '700', color: TEXT, marginBottom: 8 },
+  accessDeniedSub: { fontSize: 14, color: MUTED, textAlign: 'center', maxWidth: 280, lineHeight: 22, marginBottom: 24 },
+  accessDeniedBtn: {
+    backgroundColor: GREEN, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 28,
+  },
+  accessDeniedBtnText: { fontSize: 15, fontWeight: '700', color: BG },
+  orderIdChip: {
+    fontSize: 10, color: MUTED, backgroundColor: SURFACE2, borderWidth: 1, borderColor: BORDER2,
+    borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
 });

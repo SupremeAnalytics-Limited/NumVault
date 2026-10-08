@@ -8,9 +8,12 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAlert, getSupabaseClient } from '@/template';
 import { WalletContext } from '@/contexts/WalletContext';
 import { OrderContext } from '@/contexts/OrderContext';
+import { getSetting } from '@/services/settingsService';
+import DashboardTour, { TourStep } from '@/components/DashboardTour';
 import { fetchOrder, Order } from '@/services/orderService';
 import { requestNotificationPermissions, sendOTPReceivedNotification } from '@/services/notificationService';
 
@@ -40,11 +43,22 @@ export default function NumberDisplayScreen() {
   const [refundAmount, setRefundAmount] = useState<number | null>(null);
   const [refundError, setRefundError] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [showCelebrationTour, setShowCelebrationTour] = useState(false);
 
   // Access wallet + transaction refresh so a client-triggered refund updates
   // Available Balance immediately without requiring a manual Refresh press.
   const walletCtx = useContext(WalletContext);
   const orderCtx  = useContext(OrderContext);
+
+  useEffect(() => {
+    getSetting<boolean>('tab_tours_always_show', false).then((alwaysShow) => {
+      AsyncStorage.getItem('numvault_number_display_tour_seen').then((seen) => {
+        if (alwaysShow || !seen) {
+          setTimeout(() => setShowCelebrationTour(true), 600);
+        }
+      });
+    });
+  }, []);
 
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -562,6 +576,39 @@ export default function NumberDisplayScreen() {
           <MaterialIcons name="chevron-right" size={18} color={Colors.textSecondary} />
         </TouchableOpacity>
       </ScrollView>
+      )}
+
+      {showCelebrationTour && (
+        <DashboardTour
+          steps={[
+            {
+              title: 'You just bought your first virtual number with NumVault.Cloud ☁️',
+              body: 'Welcome! Your number is active and ready to use. Let\'s show you what to do next.',
+            },
+            {
+              title: 'This is your virtual number',
+              body: 'Tap the number to copy it. Head to the platform you\'re signing up for and enter it where they ask for a phone number.',
+            },
+            {
+              title: 'Request your OTP here',
+              body: 'Once you\'ve entered the number on the platform, come back and tap "Request OTP" — this triggers the verification code to be sent.',
+            },
+            {
+              title: 'Your OTP appears in the inbox',
+              body: 'The code shows up in the SMS Inbox box above. Tap the green copy button on the right to copy it and complete your sign-up. You\'re all set!',
+            },
+          ] as TourStep[]}
+          visible={showCelebrationTour}
+          skippable
+          onComplete={async () => {
+            setShowCelebrationTour(false);
+            await AsyncStorage.setItem('numvault_number_display_tour_seen', '1');
+          }}
+          onSkip={async () => {
+            setShowCelebrationTour(false);
+            await AsyncStorage.setItem('numvault_number_display_tour_seen', '1');
+          }}
+        />
       )}
     </View>
   );

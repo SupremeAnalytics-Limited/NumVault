@@ -20,28 +20,56 @@ const { width, height } = Dimensions.get('window');
 const SCREENS = [
   {
     image: require('@/assets/images/nv_s1.png'),
+    coverBottom: true,
     tag: null as null | string,
-    headline: 'Your number is more exposed than you',
-    body: 'Every sign-up form, every stranger you meet online, every app you download — they all want your personal phone number, with the possibility of it becoming another thing tied to your identity that can get leaked or get sold. Privacy shouldn\'t be optional by default',
+    headline: 'Use a virtual number instead.',
+    body: null as null | string,
     steps: null as null | string[],
+    bulletSections: [
+      {
+        intro: 'Every app and sign-up asking for your real number creates another opportunity for:',
+        items: ['Spam', 'Unwanted calls', 'Data Leak', 'Other privacy risks'],
+      },
+      {
+        intro: 'Use a virtual number for:',
+        items: ['Business separation', 'Project separation', 'Developer testing', 'More'],
+      },
+    ] as null | { intro: null | string; items: string[] }[],
   },
   {
     image: require('@/assets/images/nv_s2.png'),
+    coverBottom: false,
     tag: null as null | string,
-    headline: 'No subscription, No rent. Pay as you go.',
-    body: 'Choose from 2,300+ apps & services and pay only when you need a number without being locked into a monthly subscription. Your purchased number belongs to you for that service.',
+    headline: '2,300+ apps & services',
+    body: null as null | string,
     steps: null,
+    bulletSections: [
+      {
+        intro: null as null | string,
+        items: [
+          'No subscription',
+          'No rent',
+          'Pay as you go',
+          'Pay only when you need a number',
+          'No monthly commitment',
+          'Your purchased number belongs to you for that service',
+        ],
+      },
+    ] as null | { intro: null | string; items: string[] }[],
   },
   {
     image: require('@/assets/images/nv_s3.png'),
+    coverBottom: true,
     tag: null,
     headline: "Here's exactly how it works",
-    body: 'Have numbers for different purposes — personal, business, projects, accounts, and more. With 2,300+ apps & services available, you have the capacity to create separation wherever you need it.',
+    body: null,
+    bulletSections: null,
     steps: [
-      'Choose what you\'re signing up for',
+      'Choose a service',
       'Pick a number',
-      'Pay securely with your card or transfer',
-      'Get your number instantly. OTP delivered automatically.',
+      'Pay securely',
+      'Request your OTP',
+      'Get your code',
     ],
   },
 ];
@@ -121,6 +149,7 @@ export default function OnboardingScreen() {
               transition={300}
             />
             <View style={styles.gradient} />
+            {s.coverBottom && <View style={styles.imageBottomCover} />}
           </View>
         ))}
       </ScrollView>
@@ -134,7 +163,23 @@ export default function OnboardingScreen() {
           <Text style={styles.tag}>{screen.tag}</Text>
         ) : null}
         <Text style={styles.headline}>{screen.headline}</Text>
-        <Text style={styles.body}>{screen.body}</Text>
+        {screen.body ? <Text style={styles.body}>{screen.body}</Text> : null}
+
+        {screen.bulletSections ? (
+          <View style={styles.bulletSectionsWrap}>
+            {screen.bulletSections.map((section, si) => (
+              <View key={si} style={si > 0 ? styles.bulletSectionGap : undefined}>
+                {section.intro ? <Text style={styles.bulletIntro}>{section.intro}</Text> : null}
+                {section.items.map((item, ii) => (
+                  <View key={ii} style={styles.bulletRow}>
+                    <Text style={styles.bulletDot}>•</Text>
+                    <Text style={styles.bulletText}>{item}</Text>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {screen.steps ? (
           <View style={styles.stepsContainer}>
@@ -217,9 +262,18 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: height * 0.32,
+    height: height * 0.08,
     backgroundColor: Colors.background,
-    opacity: 1,
+    opacity: 0.6,
+  },
+  imageBottomCover: {
+    position: 'absolute',
+    bottom: height * 0.08,
+    left: 0,
+    right: 0,
+    height: height * 0.22,
+    backgroundColor: Colors.background,
+    opacity: 0.94,
   },
   bottomCard: {
     backgroundColor: Colors.background,
@@ -312,5 +366,36 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: FontSize.sm,
     lineHeight: 20,
+  },
+  bulletSectionsWrap: {
+    gap: 12,
+    marginTop: 4,
+  },
+  bulletSectionGap: {
+    marginTop: 4,
+  },
+  bulletIntro: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  bulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 4,
+  },
+  bulletDot: {
+    color: Colors.primary,
+    fontSize: FontSize.sm,
+    lineHeight: 20,
+  },
+  bulletText: {
+    flex: 1,
+    color: Colors.text,
+    fontSize: FontSize.sm,
+    lineHeight: 20,
+    fontWeight: FontWeight.medium,
   },
 });
