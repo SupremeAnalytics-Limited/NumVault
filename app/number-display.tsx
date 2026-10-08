@@ -599,7 +599,7 @@ export default function NumberDisplayScreen() {
             {
               ref: requestOtpBtnRef,
               title: 'Request your OTP here',
-              body: 'Once you\'ve entered the number on the platform, come back and tap "Request OTP" — this triggers the verification code to be sent.',
+              body: 'Once you\'ve entered the number on the platform and the service confirms that a verification SMS has been sent to your new number, tap "Request OTP/SMS." This triggers the verification code to be received by your new virtual number.',
             },
             {
               ref: smsInboxRowRef,
