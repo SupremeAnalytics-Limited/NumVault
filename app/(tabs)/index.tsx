@@ -76,6 +76,7 @@ export default function HomeScreen() {
   const [showHomeSheetTour, setShowHomeSheetTour] = useState(false);
   const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
   const [financeEnabled, setFinanceEnabled] = useState<boolean | null>(null);
+  const [otherCountriesEnabled, setOtherCountriesEnabled] = useState(false);
   const [focusTrigger, setFocusTrigger] = useState(0);
   const homeTourShownRef = useRef(false);
   const homeSheetTourShownRef = useRef(false);
@@ -130,9 +131,11 @@ export default function HomeScreen() {
       Promise.all([
         getSetting<boolean>('tab_tours_always_show', false),
         getSetting<boolean>('finance_enabled', true),
-      ]).then(([tours, finance]) => {
+        getSetting<boolean>('other_countries_enabled', false),
+      ]).then(([tours, finance, otherCountries]) => {
         setTabToursAlwaysShow(tours);
         setFinanceEnabled(finance !== false);
+        setOtherCountriesEnabled(!!otherCountries);
       });
       return () => {
         setShowHomeTour(false);
@@ -491,26 +494,28 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Provider tabs */}
-      <View style={styles.providerRow}>
-        {PROVIDERS.map((p) => {
-          const active = provider === p.code;
-          return (
-            <TouchableOpacity
-              key={p.code}
-              style={[styles.providerTab, active && styles.providerTabActive]}
-              onPress={async () => { await Haptics.selectionAsync(); setProvider(p.code); }}
-              activeOpacity={0.8}
-            >
-              <MaterialIcons name={p.icon as any} size={16} color={active ? Colors.primary : Colors.textMuted} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.providerTabLabel, active && styles.providerTabLabelActive]}>{p.label}</Text>
-                <Text style={styles.providerTabDesc}>{p.desc}</Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {/* Provider tabs — only shown when Other Countries is enabled in admin */}
+      {otherCountriesEnabled && (
+        <View style={styles.providerRow}>
+          {PROVIDERS.map((p) => {
+            const active = provider === p.code;
+            return (
+              <TouchableOpacity
+                key={p.code}
+                style={[styles.providerTab, active && styles.providerTabActive]}
+                onPress={async () => { await Haptics.selectionAsync(); setProvider(p.code); }}
+                activeOpacity={0.8}
+              >
+                <MaterialIcons name={p.icon as any} size={16} color={active ? Colors.primary : Colors.textMuted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.providerTabLabel, active && styles.providerTabLabelActive]}>{p.label}</Text>
+                  <Text style={styles.providerTabDesc}>{p.desc}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
 
       {/* ═══ SERVER B ═══ */}
       {provider === 'server-b' && (
@@ -671,8 +676,8 @@ export default function HomeScreen() {
         </>
       )}
 
-      {/* ═══ SERVER A — COMING SOON ═══ */}
-      {provider === 'server-a' && (
+      {/* ═══ SERVER A — COMING SOON (only shown when Other Countries toggle is ON) ═══ */}
+      {otherCountriesEnabled && provider === 'server-a' && (
         <View style={styles.comingSoonContainer}>
           <View style={styles.comingSoonCard}>
             <View style={styles.comingSoonIconWrap}>
