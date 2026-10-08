@@ -217,9 +217,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: height * 0.22,
+    height: height * 0.32,
     backgroundColor: Colors.background,
-    opacity: 0.96,
+    opacity: 1,
   },
   bottomCard: {
     backgroundColor: Colors.background,
