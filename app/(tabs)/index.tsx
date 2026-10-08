@@ -399,10 +399,13 @@ export default function HomeScreen() {
         homeSheetTourShownRef.current = true;
         const tourSeen = profile?.tours_seen?.home_sheet;
         if (tabToursAlwaysShow || !tourSeen) {
-          setShowHomeSheetTour(true);
+          // Only show if ref is actually on screen (sheet fully open and row rendered)
+          yourNumberRowRef.current?.measure((_x, _y, _w, _h, _px, py) => {
+            if (py > 0) setShowHomeSheetTour(true);
+          });
         }
       }
-    }, 400);
+    }, 900);
 
     const cached = priceCache.current.get(svc.country_code);
     if (cached !== undefined) {
