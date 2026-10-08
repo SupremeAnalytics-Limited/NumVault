@@ -4,6 +4,7 @@ import {
   View, Text, StyleSheet, Dimensions, TouchableOpacity,
   ScrollView, StatusBar,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -149,7 +150,12 @@ export default function OnboardingScreen() {
               transition={300}
             />
             <View style={styles.gradient} />
-            {s.coverBottom && <View style={styles.imageBottomCover} />}
+            {s.coverBottom && (
+              <LinearGradient
+                colors={['transparent', Colors.background]}
+                style={styles.imageBottomCover}
+              />
+            )}
           </View>
         ))}
       </ScrollView>
@@ -264,16 +270,14 @@ const styles = StyleSheet.create({
     right: 0,
     height: height * 0.08,
     backgroundColor: Colors.background,
-    opacity: 0.6,
+    opacity: 1,
   },
   imageBottomCover: {
     position: 'absolute',
     bottom: height * 0.08,
     left: 0,
     right: 0,
-    height: height * 0.22,
-    backgroundColor: Colors.background,
-    opacity: 0.94,
+    height: height * 0.30,
   },
   bottomCard: {
     backgroundColor: Colors.background,
