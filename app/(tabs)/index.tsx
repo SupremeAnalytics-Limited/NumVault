@@ -70,16 +70,12 @@ export default function HomeScreen() {
 
   const searchBarRef = useRef<View | null>(null);
   const firstCardRef = useRef<View | null>(null);
-  const yourNumberRowRef = useRef<View | null>(null);
-
   const [showHomeTour, setShowHomeTour] = useState(false);
-  const [showHomeSheetTour, setShowHomeSheetTour] = useState(false);
   const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
   const [financeEnabled, setFinanceEnabled] = useState<boolean | null>(null);
   const [otherCountriesEnabled, setOtherCountriesEnabled] = useState(false);
   const [focusTrigger, setFocusTrigger] = useState(0);
   const homeTourShownRef = useRef(false);
-  const homeSheetTourShownRef = useRef(false);
 
   const [provider, setProvider] = useState<ProviderCode>('server-b');
 
@@ -126,7 +122,6 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       homeTourShownRef.current = false;
-      homeSheetTourShownRef.current = false;
       setFocusTrigger((n) => n + 1);
       Promise.all([
         getSetting<boolean>('tab_tours_always_show', false),
@@ -139,7 +134,6 @@ export default function HomeScreen() {
       });
       return () => {
         setShowHomeTour(false);
-        setShowHomeSheetTour(false);
       };
     }, [])
   );
@@ -394,18 +388,6 @@ export default function HomeScreen() {
     setSheetPriceReady(false);
     Animated.spring(sheetAnim, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
 
-    setTimeout(() => {
-      if (!homeSheetTourShownRef.current) {
-        homeSheetTourShownRef.current = true;
-        const tourSeen = profile?.tours_seen?.home_sheet;
-        if (tabToursAlwaysShow || !tourSeen) {
-          // Only show if ref is actually on screen (sheet fully open and row rendered)
-          yourNumberRowRef.current?.measure((_x, _y, _w, _h, _px, py) => {
-            if (py > 0) setShowHomeSheetTour(true);
-          });
-        }
-      }
-    }, 900);
 
     const cached = priceCache.current.get(svc.country_code);
     if (cached !== undefined) {
@@ -720,17 +702,6 @@ export default function HomeScreen() {
           onSkip={async () => { setShowHomeTour(false); await markTourSeen('home'); }}
         />
       )}
-      {showHomeSheetTour && (
-        <DashboardTour
-          steps={[
-            { ref: yourNumberRowRef, title: 'Your number', body: 'After buying, your number appears here. Copy it to verify your account.' },
-          ] as TourStep[]}
-          visible={showHomeSheetTour}
-          skippable
-          onComplete={async () => { setShowHomeSheetTour(false); await markTourSeen('home_sheet'); }}
-          onSkip={async () => { setShowHomeSheetTour(false); await markTourSeen('home_sheet'); }}
-        />
-      )}
 
       {/* ═══ BOTTOM SHEET ═══ */}
       {isSheetOpen && (
@@ -773,7 +744,7 @@ export default function HomeScreen() {
                 { label: 'OTP delivery', value: 'Auto-captured within 5 min' },
                 { label: 'Refund policy', value: 'Auto-refund if no OTP in 5 mins', green: true },
               ].map((row) => (
-                <View key={row.label} ref={row.label === 'Your number' ? yourNumberRowRef : undefined} style={styles.sheetRow}>
+                <View key={row.label} style={styles.sheetRow}>
                   <Text style={styles.sheetRowLabel}>{row.label}</Text>
                   <Text style={[styles.sheetRowValue, row.green && { color: Colors.primary }]}>{row.value}</Text>
                 </View>
