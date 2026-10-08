@@ -75,7 +75,7 @@ export default function HomeScreen() {
   const [showHomeTour, setShowHomeTour] = useState(false);
   const [showHomeSheetTour, setShowHomeSheetTour] = useState(false);
   const [tabToursAlwaysShow, setTabToursAlwaysShow] = useState<boolean | null>(null);
-  const [financeEnabled, setFinanceEnabled] = useState(true);
+  const [financeEnabled, setFinanceEnabled] = useState<boolean | null>(null);
   const [focusTrigger, setFocusTrigger] = useState(0);
   const homeTourShownRef = useRef(false);
   const homeSheetTourShownRef = useRef(false);
@@ -127,22 +127,19 @@ export default function HomeScreen() {
       homeTourShownRef.current = false;
       homeSheetTourShownRef.current = false;
       setFocusTrigger((n) => n + 1);
+      Promise.all([
+        getSetting<boolean>('tab_tours_always_show', false),
+        getSetting<boolean>('finance_enabled', true),
+      ]).then(([tours, finance]) => {
+        setTabToursAlwaysShow(tours);
+        setFinanceEnabled(finance !== false);
+      });
       return () => {
         setShowHomeTour(false);
         setShowHomeSheetTour(false);
       };
     }, [])
   );
-
-  useEffect(() => {
-    Promise.all([
-      getSetting<boolean>('tab_tours_always_show', false),
-      getSetting<boolean>('finance_enabled', true),
-    ]).then(([tours, finance]) => {
-      setTabToursAlwaysShow(tours);
-      setFinanceEnabled(finance !== false);
-    });
-  }, []);
 
   useEffect(() => {
     if (tabToursAlwaysShow !== null && !homeTourShownRef.current) {
@@ -262,7 +259,7 @@ export default function HomeScreen() {
 
   const serverBSections: ServiceSection[] = React.useMemo(() => {
     const filtered = allServices.filter((s) => {
-      if (!financeEnabled && s.category === 'Finance') return false;
+      if (financeEnabled !== true && s.category === 'Finance') return false;
       const q = searchQuery.toLowerCase();
       return (
         (s.title.toLowerCase().includes(q) || s.country_code.toLowerCase().includes(q)) &&
@@ -276,13 +273,13 @@ export default function HomeScreen() {
 
     const order: ServiceCategory[] = ['Social', 'Messaging', 'Finance', 'Shopping', 'Other'];
     return order
-      .filter((cat) => financeEnabled || cat !== 'Finance')
+      .filter((cat) => financeEnabled === true || cat !== 'Finance')
       .map((cat) => ({ category: cat, data: filtered.filter((s) => s.category === cat) }))
       .filter((sec) => sec.data.length > 0);
   }, [allServices, searchQuery, activeCat, financeEnabled]);
 
   const catCounts = React.useMemo(() => {
-    const visibleServices = financeEnabled ? allServices : allServices.filter((s) => s.category !== 'Finance');
+    const visibleServices = financeEnabled === true ? allServices : allServices.filter((s) => s.category !== 'Finance');
     return SERVICE_CATEGORIES.reduce((acc, cat) => {
       acc[cat] = cat === 'All' ? visibleServices.length : visibleServices.filter((s) => s.category === cat).length;
       return acc;
@@ -573,7 +570,7 @@ export default function HomeScreen() {
                     style={styles.searchInput}
                     value={searchQuery}
                     onChangeText={setSearchQuery}
-                    placeholder={financeEnabled ? 'Search TikTok, WhatsApp, PayPal...' : 'Search TikTok, WhatsApp...'}
+                    placeholder={financeEnabled === true ? 'Search TikTok, WhatsApp, PayPal...' : 'Search TikTok, WhatsApp...'}
                     placeholderTextColor={Colors.textMuted}
                     returnKeyType="search"
                   />
@@ -592,7 +589,7 @@ export default function HomeScreen() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.chipRow}
                 >
-                  {SERVICE_CATEGORIES.filter((c) => (financeEnabled || c !== 'Finance') && (catCounts[c] > 0 || c === 'All')).map((cat) => {
+                  {SERVICE_CATEGORIES.filter((c) => (financeEnabled === true || c !== 'Finance') && (catCounts[c] > 0 || c === 'All')).map((cat) => {
                     const active = activeCat === cat;
                     return (
                       <TouchableOpacity
@@ -706,7 +703,7 @@ export default function HomeScreen() {
       {showHomeTour && (
         <DashboardTour
           steps={[
-            { ref: searchBarRef, title: 'Search for any service', body: financeEnabled ? 'Type a platform name — TikTok, WhatsApp, PayPal — to find it instantly.' : 'Type a platform name — TikTok, WhatsApp — to find it instantly.' },
+            { ref: searchBarRef, title: 'Search for any service', body: financeEnabled === true ? 'Type a platform name — TikTok, WhatsApp, PayPal — to find it instantly.' : 'Type a platform name — TikTok, WhatsApp — to find it instantly.' },
             { ref: firstCardRef, title: 'Tap a card to see the price and buy a number', body: 'Each card shows the price. Tap it, then confirm your purchase.' },
           ] as TourStep[]}
           visible={showHomeTour}
