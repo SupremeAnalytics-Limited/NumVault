@@ -25,6 +25,7 @@ const SCREENS = [
     coverBottom: true,
     coverTop: false,
     coverFull: false,
+    coverMiddle: false,
     tag: null as null | string,
     headline: 'Use a virtual number instead.',
     body: null as null | string,
@@ -46,6 +47,7 @@ const SCREENS = [
     coverBottom: false,
     coverTop: false,
     coverFull: false,
+    coverMiddle: false,
     tag: null as null | string,
     headline: '2,300+ apps & services',
     body: null as null | string,
@@ -68,8 +70,9 @@ const SCREENS = [
     image: require('@/assets/images/nv_s3.png'),
     imageOpacity: 1,
     coverBottom: true,
-    coverTop: true,
+    coverTop: false,
     coverFull: false,
+    coverMiddle: true,
     tag: null,
     headline: "Here's exactly how it works",
     body: null,
@@ -158,6 +161,9 @@ export default function OnboardingScreen() {
               contentFit="cover"
               transition={300}
             />
+            {s.coverMiddle && (
+              <View style={styles.imageMiddleCover} />
+            )}
             {s.coverFull && (
               <View style={styles.imageFullCover} />
             )}
@@ -289,6 +295,15 @@ const styles = StyleSheet.create({
     height: height * 0.08,
     backgroundColor: Colors.background,
     opacity: 1,
+  },
+  imageMiddleCover: {
+    position: 'absolute',
+    top: height * 0.22,
+    left: 0,
+    right: 0,
+    height: height * 0.20,
+    backgroundColor: Colors.background,
+    zIndex: 2,
   },
   imageFullCover: {
     position: 'absolute',
