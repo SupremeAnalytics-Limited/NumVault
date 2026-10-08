@@ -1,7 +1,71 @@
 # NumVault — Developer Notes
 
-**Period covered:** 21–23 September 2026
+**Period covered:** 21–23 September 2026 (update added 8 October 2026)
 **Summary:** NumVault moved off OnSpace onto its own Supabase backend, was hardened, rebuilt for iOS (TestFlight) and Android (new Play listing), and the ambassador programme gained checkpoints, countdowns and corrected notifications.
+
+> **How to read this file.** The numbered sections further down were written on 23 September 2026 and describe the app as it was then. Anything that has since changed is marked **Superseded**, and the current state is in the update below. Last reviewed: 8 October 2026.
+
+---
+
+## Update, 8 October 2026 (covers 24 September to 8 October)
+
+### Where things stand
+
+| Area | State on 8 October |
+|---|---|
+| Payments | Paystack registered business, live since 6 October. Transfer OTP is off so automatic transfers can run. Sales still settle the next day into the company bank account. Manual settlement (money held in the Paystack balance) and a Paystack-held payout account are requested and waiting on Paystack. |
+| Automatic Socially.ng top-up | Built and deployed. No top-up has succeeded yet: the Paystack balance is empty, so there is no settled money to send. The first live test is still to do. |
+| Scale Mode | Built on 25 September. The switch is in Admin, Settings, Pricing and payments. Off on 8 October. |
+| Pricing | The margin is a setting (`app_settings.flat_acquisition_fee`, currently ₦1,500). The server re-checks the price with Socially.ng before charging and saves the wholesale cost on every order (`orders.wholesale_cost`). |
+| App Store | Build 12. Submitted 28 September, then withdrawn and resubmitted on 7 and 8 October. Waiting for Review as of 8 October. |
+| Email | Login and password codes still go through Zoho SMTP (`support@numvault.cloud`). Nothing else has been set up. |
+| Ambassador programme | Hidden in the app (`acquisition_program_visible` is off). 5 enrolled, all qualifying, none paid. |
+
+### What changed since 23 September
+
+- **24 September:** the margin became an admin setting. The acquisition-program pitch text became editable from Admin (`job_ad_content`).
+- **25 September:** Scale Mode added (below). The per-order "near-instant transfer" feature was removed completely. `wholesale_cost` is saved on every order.
+- **Scale Mode** is a branch inside `ensure-socially-balance`, not a second mechanism. When `scale_mode_enabled` is on, the target Socially.ng balance is the larger of ₦107,000 or the last 24 hours of wholesale spend. Top-ups have no ₦200,000 cap, the smallest top-up is ₦10,000, and anything above ₦10,000,000 is split into chunks and sent as bulk transfers. It only ever spends Paystack money that is left after the payout reserve; when there is not enough, it sends a partial top-up and alerts the admin. When it is off, the classic rule applies: top up when the balance is at or below ₦40,000, sending 1.5 times the last hour of wholesale spend (₦40,000 to ₦200,000).
+- **Admin Settings** are grouped: Pricing and payments, Customer tours and intros, Ambassador program. Settings in `app_settings`: `scale_mode_enabled`, `flat_acquisition_fee`, `app_onboarding_force_every_session`, `tab_tours_always_show`, `checkout_intro_always_show`, `other_countries_enabled`, `finance_enabled`, `acquisition_program_visible`, `skip_qualification_month`, `acquisition_landing_force_every_session`, `dashboard_tour_force_every_session`, `job_ad_content`.
+- **Tours (7 and 8 October):**
+  - `components/DashboardTour.tsx` is shared by every tour. It now draws a spotlight: four dim panels around the target so the highlighted element stays fully visible.
+  - Number screen tour (first purchase): welcome, the number, the Request OTP/SMS button, the inbox. It starts only after the order has loaded, and it leaves out the Request OTP step when that button is not on screen (completed or expired orders).
+  - Tab tours (Home, Wallet, Orders), the checkout intro and the ambassador dashboard tour. Tour state: `profile.tours_seen` for most tours and the `numvault_number_display_tour_seen` key on the device for the number screen.
+  - The onboarding artwork on screen 3 was adjusted several times to hide text artifacts in the image.
+- **8 October:** the "~25% success rate" WhatsApp warning was removed from checkout. WhatsApp wholesale is ₦4,108 (customer pays ₦5,608). A test purchase delivered its code.
+
+### How purchases behave
+
+- A wallet purchase usually takes about 6 seconds, and the slowest seen were 12 to 14 seconds. Roughly half is the server re-checking the price with Socially.ng before it charges. The rest is Socially.ng finding a number.
+- A 60-second price cache was considered and not built: it saves about 3 seconds but could sell at a stale price if Socially.ng changes a price. After App Store approval, revisit: run the login check, the settings read and the price lookup in parallel (about half a second saved), and add a 10 to 15 second cache only if Socially.ng rate limits become a problem.
+- If a code reaches Socially.ng after the app has stopped polling, `auto-expire-orders` completes the order instead of refunding it.
+
+### How to ship now (replaces the local-build advice in section 9)
+
+- Commit to `main` with the GitHub connector. For JavaScript-only changes, run the `eas-update.yml` workflow (channel `production`, with a message) and check that the run succeeds. The app is on runtime version 1.0.4, so only 1.0.4 builds receive the update.
+- Native changes still need a new build (`eas-build.yml`) and a new store submission.
+- Nothing needs to be cloned locally.
+
+### Gotchas learned since 23 September
+
+- Deleting an order: `acquisition_ledger_entries` has a foreign key to `orders`, so delete the ledger row first. A direct change to `wallet_balance` writes no history row, while `credit_wallet` always writes a transaction row.
+- The Supabase log API accepts at most 24 hours per query. Pass the time range as parameters; comparing timestamps inside the query text fails.
+- An unknown email at login falls through to sign-up and emails a code to that address. A mistyped address bounces to the support inbox and leaves an unconfirmed account.
+- The store-review account (`support@numvault.cloud`) should keep a clean history and enough wallet balance for a test purchase. Delete test activity after testing.
+
+### Before scaling (current status)
+
+1. **Manual settlement** so settled sales stay in the Paystack balance. Requested, waiting on Paystack.
+2. **First live Socially.ng top-up** to prove the transfer path. Not done.
+3. **Turn on Scale Mode** only after 1 and 2.
+4. **Email provider.** Move login codes from Zoho to a transactional provider (for example Resend, Postmark or Amazon SES). It is a change to the SMTP settings in Supabase plus the provider's DNS records. No app update needed.
+5. **Supabase plan.** Notes say the free plan as of 23 September; confirm the current plan and upgrade before public traffic.
+6. **Expo updates plan.** The free tier covers 1,000 monthly active users.
+7. **Split overlap.** Decide whether to keep both the settlement splits and the top-up (about one day of wholesale sits at Socially.ng) or lower the splits to 0%.
+8. **Tour switches.** `tab_tours_always_show` and `checkout_intro_always_show` are on for testing. Decide before public launch.
+9. **Repository visibility.** GitHub reports this repository as public on 8 October while the README says it is private. Decide which is intended and make them match.
+
+---
 
 No secrets are recorded here. Keys live in Supabase → Edge Functions → Secrets, in EAS credentials, and in the Paystack / Socially.ng / Zoho / Firebase dashboards.
 
@@ -13,7 +77,7 @@ No secrets are recorded here. Keys live in Supabase → Edge Functions → Secre
 |---|---|
 | Code | GitHub `SupremeAnalytics-Limited/NumVault`, branch **`main`** |
 | Old OnSpace code (backup) | branch `onspace-legacy` (untouched) |
-| Backend | Supabase project `xiklcfiobtvjzjanqpqw` (eu-west-2, free plan) |
+| Backend | Supabase project `xiklcfiobtvjzjanqpqw` (eu-west-2, free plan as of 23 September; confirm the current plan) |
 | Builds | EAS project `@supremeesimon/numvault` (id `9194c8f5-1135-43b2-8564-ea3c67f4ea68`) |
 | iOS | Bundle `ng.numvault.app`, App Store Connect app id `6814984686` |
 | Android | Package **`cloud.numvault.app`** (new listing; the old `ng.numvault.app` internal-test app was deleted) |
@@ -107,7 +171,7 @@ Deliberately **not deployed:** `manual-transfer-test`, `save-card`, `setup-subac
 - **Splits:**
   - Direct number purchase: `transaction_charge` = ₦1,500 to NumVault; the subaccount (Socially.ng's PalmPay) receives the exact wholesale. Settles T+1.
   - Wallet top-up: subaccount `percentage_charge` 71.43% goes to Socially.ng up front.
-- **Business account is still "starter"**, so Paystack **transfers are blocked** until compliance approves. This blocks both Lead payouts and the automatic Socially top-up.
+- **Superseded (6 October):** the business is now a registered business and live on Paystack, so transfers are no longer blocked by the starter tier. See the update at the top. (On 23 September the account was "starter", which blocked Lead payouts and the automatic Socially top-up.)
 
 ---
 
@@ -121,7 +185,9 @@ It runs after purchases and every minute via cron:
 - Alerts the admin at ≤ ₦15,000, on a partial top-up, and on failure.
 - Capacity is about 12 top-ups an hour, roughly 3,000 numbers an hour at ₦800 wholesale. A simulation showed zero failed purchases up to 1,500 an hour (with 30 minutes, 116 failed at 700 an hour).
 
-**Status:** it has never successfully transferred. All 9 historical attempts failed: 8 with "balance not enough" and 1 with "bank invalid". Transfers are also blocked by the starter account.
+**Status on 23 September:** it had never successfully transferred. All 9 historical attempts failed: 8 with "balance not enough" and 1 with "bank invalid". Transfers were also blocked by the starter account.
+
+**Update (8 October):** still no successful transfer. The starter block is gone, but the Paystack balance is empty, so there is no settled money to send. See the update at the top.
 
 **Overlap to fix later:** with the splits on *and* the top-up on, Socially.ng is paid twice for the same numbers (the top-up advance today, plus the split reimbursement tomorrow). About one day's wholesale ends up parked at Socially.ng.
 
@@ -225,14 +291,14 @@ After the fix, the notification check showed exactly one "76 reached", one admin
 - **Keep Supabase "Deploy to production" off** until a `supabase/config.toml` exists with `[functions.paystack-webhook] verify_jwt = false`. A default redeploy would re-enable the JWT check and every Paystack payment would stop crediting wallets.
 - **Migration file names must match the live versions** (`list_migrations`), or the GitHub integration would try to re-run them.
 - After `npm install`, `package-lock.json` often changes locally and blocks `git pull`. Fix with `git checkout -- package-lock.json`.
-- Always `git pull` and check `git log --oneline -1` before `eas build`. Two builds went out on stale code this week.
+- **Superseded:** code now ships through the GitHub connector and the `eas-update.yml` workflow, with no local copy. See the update at the top. (Original advice: always `git pull` and check `git log --oneline -1` before `eas build`, because two builds went out on stale code that week.)
 - iOS keeps `ng.numvault.app`; Android is `cloud.numvault.app`. Don't unify them.
 - Google's robot accounts (`crawlerrobo`, `cloudtestlab…`) are expected after every Play upload.
 - Don't run `npm audit fix --force`; it breaks the Expo SDK 53 dependency set.
 
 ---
 
-## 10. Open items
+## 10. Open items (as of 23 September; the current list is in the update at the top)
 
 1. Delete the OnSpace project (data reconciled; safe).
 2. Real ₦100 top-up to confirm the rotated Paystack key and webhook.
