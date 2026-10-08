@@ -130,8 +130,6 @@ export default function CheckoutScreen() {
     return { message: msg };
   };
 
-  const isWhatsApp = (params.project_name || '').toLowerCase().includes('whatsapp');
-
   // Format naira: show 2 decimal places only when there are kobo cents
   const formatNaira = (amount: number): string => {
     const kobo = Math.round(amount * 100) % 100;
@@ -323,16 +321,6 @@ export default function CheckoutScreen() {
           </View>
 
           <View style={styles.divider} />
-
-          {/* WhatsApp OTP delivery notice */}
-          {isWhatsApp && (
-            <View style={styles.deliveryNotice}>
-              <MaterialIcons name="info-outline" size={14} color={Colors.warning} />
-              <Text style={styles.deliveryNoticeText}>
-                OTP delivery for WhatsApp numbers currently has a ~25% success rate. If your code does not arrive, your payment will be automatically refunded.
-              </Text>
-            </View>
-          )}
 
           {/* Price breakdown */}
           <View ref={priceWalletRef} style={styles.priceSection}>
@@ -597,27 +585,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   chargesNote: { color: Colors.primary, fontSize: 12, fontWeight: FontWeight.semibold },
-
-  // WhatsApp delivery notice
-  deliveryNotice: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.sm,
-    backgroundColor: 'rgba(255,171,0,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,171,0,0.35)',
-    borderRadius: Radius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginHorizontal: Spacing.lg,
-    marginBottom: 2,
-  },
-  deliveryNoticeText: {
-    flex: 1,
-    color: Colors.warning,
-    fontSize: 11,
-    lineHeight: 16,
-  },
 
   // Wallet banner
   walletBanner: {
