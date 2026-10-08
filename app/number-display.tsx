@@ -44,6 +44,10 @@ export default function NumberDisplayScreen() {
   const [refundError, setRefundError] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [showCelebrationTour, setShowCelebrationTour] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const phoneRowRef = useRef<View>(null);
+  const requestOtpBtnRef = useRef<View>(null);
+  const smsInboxRowRef = useRef<View>(null);
 
   // Access wallet + transaction refresh so a client-triggered refund updates
   // Available Balance immediately without requiring a manual Refresh press.
@@ -354,6 +358,7 @@ export default function NumberDisplayScreen() {
         </View>
       ) : (
       <ScrollView
+        ref={scrollViewRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
       >
@@ -379,7 +384,7 @@ export default function NumberDisplayScreen() {
           <View style={styles.divider} />
 
           {/* Mobile Number row */}
-          <View style={styles.dataRow}>
+          <View ref={phoneRowRef} style={styles.dataRow}>
             <Text style={styles.dataLabel}>Mobile Number</Text>
             {order?.phone_number ? (
               <TouchableOpacity
@@ -407,6 +412,7 @@ export default function NumberDisplayScreen() {
           {/* Request OTP button - shown only when not yet received and not expired */}
           {!otpReceived && !expired && (
             <TouchableOpacity
+              ref={requestOtpBtnRef}
               style={[styles.requestOtpBtn, (requestingOTP || !order?.phone_number) && styles.requestOtpBtnDisabled]}
               onPress={handleRequestOTP}
               disabled={requestingOTP || !order?.phone_number}
@@ -423,7 +429,7 @@ export default function NumberDisplayScreen() {
           )}
 
           {/* SMS Inbox */}
-          <View style={styles.smsInboxRow}>
+          <View ref={smsInboxRowRef} style={styles.smsInboxRow}>
             <View style={{ marginBottom: 6 }}>
               <Text style={styles.dataLabel}>SMS Inbox Message</Text>
             </View>
@@ -586,19 +592,23 @@ export default function NumberDisplayScreen() {
               body: 'Welcome! Your number is active and ready to use. Let\'s show you what to do next.',
             },
             {
+              ref: phoneRowRef,
               title: 'This is your virtual number',
               body: 'Tap the number to copy it. Head to the platform you\'re signing up for and enter it where they ask for a phone number.',
             },
             {
+              ref: requestOtpBtnRef,
               title: 'Request your OTP here',
               body: 'Once you\'ve entered the number on the platform, come back and tap "Request OTP" — this triggers the verification code to be sent.',
             },
             {
+              ref: smsInboxRowRef,
               title: 'Your OTP appears in the inbox',
               body: 'The code shows up in the SMS Inbox box above. Tap the green copy button on the right to copy it and complete your sign-up. You\'re all set!',
             },
           ] as TourStep[]}
           visible={showCelebrationTour}
+          scrollViewRef={scrollViewRef}
           skippable
           onComplete={async () => {
             setShowCelebrationTour(false);
