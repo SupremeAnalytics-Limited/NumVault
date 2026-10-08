@@ -66,9 +66,9 @@ const SCREENS = [
   },
   {
     image: require('@/assets/images/nv_s3.png'),
-    imageOpacity: 0.12,
+    imageOpacity: 1,
     coverBottom: true,
-    coverTop: false,
+    coverTop: true,
     coverFull: false,
     tag: null,
     headline: "Here's exactly how it works",
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: height * 0.28,
+    height: height * 0.42,
     zIndex: 2,
   },
   imageBottomCover: {
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
     bottom: height * 0.08,
     left: 0,
     right: 0,
-    height: height * 0.30,
+    height: height * 0.42,
   },
   bottomCard: {
     backgroundColor: Colors.background,
