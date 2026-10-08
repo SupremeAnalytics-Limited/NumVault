@@ -6,7 +6,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const TOOLTIP_MARGIN = 12;
 const HIGHLIGHT_PADDING = 8;
 
@@ -135,9 +135,29 @@ export default function DashboardTour({
     tooltipTop = SCREEN_HEIGHT / 2 - 120;
   }
 
+  // Spotlight: when a target is measured, dim everything EXCEPT the target by
+  // drawing four panels around it, so the highlighted content stays fully
+  // visible instead of sitting under the dark overlay.
+  let holeLeft = 0, holeTop = 0, holeRight = 0, holeBottom = 0;
+  if (rect) {
+    holeLeft = Math.max(0, rect.x - HIGHLIGHT_PADDING);
+    holeTop = Math.max(0, rect.y - HIGHLIGHT_PADDING);
+    holeRight = Math.min(SCREEN_WIDTH, rect.x + rect.width + HIGHLIGHT_PADDING);
+    holeBottom = Math.min(SCREEN_HEIGHT, rect.y + rect.height + HIGHLIGHT_PADDING);
+  }
+
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="auto">
-      <View style={styles.backdrop} />
+      {rect && !measuring ? (
+        <>
+          <View style={[styles.backdropPanel, { top: 0, left: 0, right: 0, height: holeTop }]} />
+          <View style={[styles.backdropPanel, { top: holeBottom, left: 0, right: 0, bottom: 0 }]} />
+          <View style={[styles.backdropPanel, { top: holeTop, left: 0, width: holeLeft, height: holeBottom - holeTop }]} />
+          <View style={[styles.backdropPanel, { top: holeTop, left: holeRight, right: 0, height: holeBottom - holeTop }]} />
+        </>
+      ) : (
+        <View style={styles.backdrop} />
+      )}
 
       {rect && !measuring ? (
         <Animated.View
@@ -191,6 +211,10 @@ export default function DashboardTour({
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  backdropPanel: {
+    position: 'absolute',
     backgroundColor: 'rgba(0,0,0,0.72)',
   },
   highlight: {
