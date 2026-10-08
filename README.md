@@ -109,7 +109,7 @@ We grow **slowly and compound**: prove repeat buying, flawless refunds and genui
 
 ## 7. Projection: slow growth from today
 
-**Starting point (live data):** 7 enrolled leads (1 paid, 6 qualifying), wholesale balance ₦107,120.
+**Starting point (September, when the model was built):** 7 enrolled leads (1 paid, 6 qualifying), wholesale balance ₦107,120. On 8 October the live figures were 5 enrolled leads (all qualifying, none paid) and a wholesale balance of ₦107,413.
 
 **Model inputs:**
 - every lead hits 76 customers per 30 days (their target), each on their own clock;
@@ -177,11 +177,11 @@ The timing of each step below is an **internal decision**, sequenced so that Num
 
 | Step | Status |
 |---|---|
-| Registered-business payments (Paystack) | Finalising, as scheduled |
-| Automatic lead payouts and wholesale top-ups | Built and deployed; enabled at launch |
+| Registered-business payments (Paystack) | Live since 6 October 2026 |
+| Automatic lead payouts and wholesale top-ups | Built and deployed; waiting on manual settlement and a first live top-up test |
 | Transfer OTP | ✅ Configured for automatic transfers |
-| Company banking and settlement | Being set up, as scheduled |
-| App Store and Play Store release | Scheduled for launch |
+| Company banking and settlement | Company bank account active; manual settlement requested from Paystack |
+| App Store and Play Store release | iOS build in App Review (resubmitted 8 October 2026); Play Store release scheduled for launch |
 | Lead City University roll-out | Leads enrolled and qualifying |
 
 ## 10. Code status
@@ -199,13 +199,15 @@ The timing of each step below is an **internal decision**, sequenced so that Num
 - Scale the database plan and apply performance tuning ahead of public traffic.
 - Final end-to-end run of payouts and top-ups on live payments.
 - Store release and a shareable sign-up link.
+- Move login codes from Zoho to a transactional email provider.
+- Turn off the testing switches for tours in Admin before public launch.
 
 ## 11. For developers
 
 - **App:** Expo / React Native / Expo Router (`app/`), services in `services/`, shared UI in `components/`.
 - **Backend:** Supabase (Postgres, Row Level Security, Edge Functions in `supabase/functions/`, migrations in `supabase/migrations/`).
-- **Updates:** JavaScript changes ship with `eas update --channel production`; native changes need a new EAS build.
-- **History:** see [`developer-notes/developers-note.md`](developer-notes/developers-note.md) for backend history and setup notes.
+- **Updates:** JavaScript changes ship with `eas update --channel production` (in practice through the `eas-update.yml` GitHub workflow); native changes need a new EAS build.
+- **History:** see [`developer-notes/developers-note.md`](developer-notes/developers-note.md) for backend history and setup notes, including an update dated 8 October 2026.
 
 ```bash
 npm install
