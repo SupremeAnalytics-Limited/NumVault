@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
   },
   imageMiddleCover: {
     position: 'absolute',
-    top: height * 0.22,
+    top: height * 0.27,
     left: 0,
     right: 0,
     height: height * 0.20,
