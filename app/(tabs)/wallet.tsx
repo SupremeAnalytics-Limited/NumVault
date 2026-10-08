@@ -58,13 +58,10 @@ export default function WalletScreen() {
   const LOW_BALANCE_THRESHOLD = 500;
   const lowBalanceNotifiedRef = React.useRef(false);
 
-  useEffect(() => {
-    getSetting<boolean>('tab_tours_always_show', false).then((v) => setTabToursAlwaysShow(v));
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
       walletTourShownRef.current = false;
+      getSetting<boolean>('tab_tours_always_show', false).then((v) => setTabToursAlwaysShow(v));
       return () => {
         setShowWalletTour(false);
       };
