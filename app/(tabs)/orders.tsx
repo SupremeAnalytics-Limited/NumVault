@@ -87,13 +87,10 @@ export default function OrdersScreen() {
     },
   ];
 
-  useEffect(() => {
-    getSetting<boolean>('tab_tours_always_show', false).then((v) => setTabToursAlwaysShow(v));
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
       ordersTourShownRef.current = false;
+      getSetting<boolean>('tab_tours_always_show', false).then((v) => setTabToursAlwaysShow(v));
       return () => {
         setShowOrdersTour(false);
       };
