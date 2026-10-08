@@ -90,7 +90,6 @@ export default function OrdersScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      ordersTourShownRef.current = false;
       setFocusTrigger((n) => n + 1);
       getSetting<boolean>('tab_tours_always_show', false).then((v) => setTabToursAlwaysShow(v));
       return () => {

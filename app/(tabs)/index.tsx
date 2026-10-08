@@ -121,7 +121,6 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      homeTourShownRef.current = false;
       setFocusTrigger((n) => n + 1);
       Promise.all([
         getSetting<boolean>('tab_tours_always_show', false),
