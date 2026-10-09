@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  StatusBar, ActivityIndicator, TextInput, AppState,
+  StatusBar, ActivityIndicator, AppState,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -194,20 +194,6 @@ export default function OrdersScreen() {
 
       {/* ── Compact filter bar ── */}
       <View style={styles.filterBar}>
-        {/* Search */}
-        <View style={styles.searchWrap}>
-          <MaterialIcons name="search" size={15} color={Colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            value={serviceFilter === 'all' ? '' : ''}
-            placeholder="Search service or country..."
-            placeholderTextColor={Colors.textMuted}
-            onChangeText={() => {}}
-            editable={false}
-            pointerEvents="none"
-          />
-        </View>
-
         {/* Status + Service chips in ONE horizontal scroll */}
         <ScrollView
           horizontal
@@ -416,24 +402,6 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: Colors.surfaceBorder,
-  },
-  searchWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginHorizontal: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.md,
-    paddingHorizontal: 10,
-    height: 36,
-  },
-  searchInput: {
-    flex: 1,
-    color: Colors.text,
-    fontSize: 13,
-    includeFontPadding: false,
   },
   chipRow: {
     paddingHorizontal: Spacing.lg,
